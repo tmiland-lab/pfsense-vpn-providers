@@ -231,15 +231,29 @@ display_top_tabs($tab_array);
 			<input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['request_token']) ?>" />
 			<input type="hidden" name="action" value="add_airvpn" />
 			<table class="table">
-				<tr><td style="width:25%"><strong><?= gettext('Name') ?></strong><br /><span class="text-muted"><?= gettext('e.g. AirVPN Sweden') ?></span></td>
-					<td><input class="form-control" type="text" name="name" maxlength="40" autocomplete="off" required /></td></tr>
+				<tr><td style="width:25%"><strong><?= gettext('Name') ?></strong><br /><span class="text-muted"><?= gettext('auto-filled from the selected server as e.g. AirVPN_SE - you can edit it') ?></span></td>
+					<td><input class="form-control" type="text" name="name" id="pvd-name" maxlength="40" autocomplete="off" required placeholder="AirVPN_SE" /></td></tr>
 <?php if (isset($airvpn_servers['list'])): ?>
+<?php $grouped = array(); foreach ($airvpn_servers['list'] as $s) { $grouped[$s['continent']][] = $s; } ?>
+				<tr><td><strong><?= gettext('Continent') ?></strong><br /><span class="text-muted"><?= gettext('as grouped on airvpn.org/status') ?></span></td>
+					<td>
+						<select class="form-control" id="airvpn-continent" onchange="vppFilterContinent()">
+							<option value="" selected><?= sprintf(gettext('Earth (%d servers)'), count($airvpn_servers['list'])) ?></option>
+<?php foreach ($grouped as $continent => $g): ?>
+							<option value="<?= htmlspecialchars($continent) ?>"><?= htmlspecialchars($continent) ?> (<?= count($g) ?>)</option>
+<?php endforeach; ?>
+						</select>
+					</td></tr>
 				<tr><td><strong><?= gettext('Server') ?></strong><br /><span class="text-muted"><?= sprintf(gettext('%d healthy servers from the AirVPN API'), count($airvpn_servers['list'])) . ' <a href="?refresh_servers=1">' . gettext('refresh') . '</a>' ?></span></td>
 					<td>
-						<select class="form-control" name="server" required>
+						<select class="form-control" name="server" id="airvpn-server" onchange="vppDeriveName()" required>
 							<option value="" selected><?= gettext('select a server') ?></option>
-<?php foreach ($airvpn_servers['list'] as $s): ?>
-							<option value="<?= htmlspecialchars($s['host']) ?>">[<?= htmlspecialchars($s['cc']) ?>] <?= htmlspecialchars($s['country']) ?> - <?= htmlspecialchars($s['name']) ?> (<?= (int)$s['load'] ?>%, <?= htmlspecialchars($s['ip']) ?>)</option>
+<?php foreach ($grouped as $continent => $g): ?>
+							<optgroup label="<?= htmlspecialchars($continent) ?>">
+<?php foreach ($g as $s): ?>
+								<option value="<?= htmlspecialchars($s['host']) ?>" data-cc="<?= htmlspecialchars($s['cc']) ?>">[<?= htmlspecialchars($s['cc']) ?>] <?= htmlspecialchars($s['country']) ?> - <?= htmlspecialchars($s['name']) ?> (<?= (int)$s['load'] ?>%, <?= htmlspecialchars($s['ip']) ?>)</option>
+<?php endforeach; ?>
+							</optgroup>
 <?php endforeach; ?>
 						</select>
 					</td></tr>
@@ -251,6 +265,36 @@ display_top_tabs($tab_array);
 					<td><textarea class="form-control" name="tlskey" rows="5" placeholder="-----BEGIN OpenVPN Static key V1-----"></textarea></td></tr>
 			</table>
 			<p class="text-muted"><?= gettext('Reuses the installed AirVPN_CA. The remote list is managed by the AirVPN Remotes monitor package once the client is enabled.') ?></p>
+<?php if (isset($airvpn_servers['list'])): ?>
+			<script>
+function vppFilterContinent() {
+	var cont = document.getElementById('airvpn-continent');
+	var sel = document.getElementById('airvpn-server');
+	if (!cont || !sel) { return; }
+	var wanted = cont.value;
+	[].forEach.call(sel.querySelectorAll('optgroup'), function (g) {
+		g.style.display = (wanted === '' || g.getAttribute('label') === wanted) ? '' : 'none';
+	});
+	if (sel.selectedIndex < 0 || sel.options[sel.selectedIndex].parentNode.style.display === 'none') {
+		sel.selectedIndex = 0;
+	}
+	vppDeriveName();
+}
+function vppDeriveName() {
+	var sel = document.getElementById('airvpn-server');
+	var nm = document.getElementById('pvd-name');
+	if (!sel || !nm) { return; }
+	var opt = sel.options[sel.selectedIndex];
+	if (!opt) { return; }
+	var cc = (opt.getAttribute('data-cc') || '').toUpperCase();
+	if (!/^[A-Z]{2}$/.test(cc)) { return; }
+	var cur = nm.value.trim();
+	if (cur === '' || /^AirVPN_[A-Z]{2}$/i.test(cur)) {
+		nm.value = 'AirVPN_' + cc;
+	}
+}
+</script>
+<?php endif; ?>
 			<button type="submit" class="btn btn-primary"><?= gettext('Create (disabled)') ?></button>
 		</form>
 	</div>

@@ -146,16 +146,22 @@ echo "== AirVPN status API parse ==\n";
 $api_json = json_encode(array('servers' => array(
 	array('name' => 'Wolfsburg', 'country_code' => 'de', 'country_name' => 'Germany', 'public_name' => 'de2.vpn.airdns.org', 'health' => 'ok', 'currentload' => 33, 'ip_v4_in1' => '1.2.3.4'),
 	array('name' => 'Stockholm', 'country_code' => 'se', 'country_name' => 'Sweden', 'public_name' => 'se3.vpn.airdns.org', 'health' => 'ok', 'currentload' => 12, 'ip_v4_in1' => '5.6.7.8'),
+	array('name' => '', 'country_code' => 'us', 'country_name' => 'United States', 'public_name' => 'us2.vpn.airdns.org', 'health' => 'ok', 'currentload' => 5, 'ip_v4_in1' => '9.9.9.9'),
+	array('name' => 'Auckland', 'country_code' => 'nz', 'country_name' => 'New Zealand', 'public_name' => 'nz2.vpn.airdns.org', 'health' => 'ok', 'currentload' => 2, 'ip_v4_in1' => '8.8.8.8'),
 	array('name' => 'Downed', 'country_code' => 'nl', 'country_name' => 'Netherlands', 'public_name' => 'nl9.vpn.airdns.org', 'health' => 'down', 'currentload' => 0),
-	array('name' => 'NoHost', 'country_code' => 'us', 'country_name' => 'USA', 'health' => 'ok', 'currentload' => 5),
+	array('name' => 'NoHost', 'country_code' => 'pt', 'country_name' => 'Portugal', 'health' => 'ok', 'currentload' => 0),
 )));
 $parsed_api = vpp_airvpn_parse_status($api_json);
 check(!isset($parsed_api['error']), 'status parse ok');
-check(count($parsed_api['list']) === 2, 'healthy+hosted servers only (2)');
-check($parsed_api['list'][0]['host'] === 'de2.vpn.airdns.org', 'sorted by country then load (Germany first)');
-check($parsed_api['list'][0]['cc'] === 'DE' && $parsed_api['list'][0]['load'] === 33, 'country code uppercased + load int');
-check($parsed_api['list'][1]['host'] === 'se3.vpn.airdns.org', 'Sweden second');
+check(count($parsed_api['list']) === 4, 'healthy+hosted servers only (4)');
+check($parsed_api['list'][0]['host'] === 'us2.vpn.airdns.org' && $parsed_api['list'][0]['continent'] === 'America', 'america first (AirVPN website order)');
+check($parsed_api['list'][0]['cc'] === 'US' && $parsed_api['list'][0]['load'] === 5, 'country code uppercased + load int');
+check($parsed_api['list'][0]['name'] === 'us2.vpn.airdns.org', 'empty API name falls back to public_name');
+check($parsed_api['list'][1]['continent'] === 'Europe' && $parsed_api['list'][1]['host'] === 'de2.vpn.airdns.org', 'Germany first within Europe');
+check($parsed_api['list'][2]['host'] === 'se3.vpn.airdns.org', 'Sweden second within Europe');
+check($parsed_api['list'][3]['host'] === 'nz2.vpn.airdns.org' && $parsed_api['list'][3]['continent'] === 'Oceania', 'Oceania last');
 check(isset(vpp_airvpn_parse_status('{bad')[ 'error']), 'bad json -> error');
+check(vpp_airvpn_continent('nl') === 'Europe' && vpp_airvpn_continent('us') === 'America' && vpp_airvpn_continent('za') === 'Africa' && vpp_airvpn_continent('ae') === 'Middle East', 'continent map: nl/us/za/ae');
 
 echo "== duplicate name rejected ==\n";
 $GLOBALS['CFG'] = array('openvpn' => array('openvpn-client' => array($plan['client'])));

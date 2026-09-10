@@ -79,6 +79,69 @@ function vpp_registry_save($reg) {
 
 define('VPP_AIRVPN_STATUS_URL', 'https://airvpn.org/api/status/');
 
+/* Continent grouping matching the AirVPN website (Earth / America / Asia /
+   Europe / Oceania). "America" spans North + Central + South + Caribbean.
+   Africa and Middle East are supported for any future locations. */
+define('VPP_AIRVPN_CONTINENTS', array(
+	'AF' => 'Asia', 'AL' => 'Europe', 'DZ' => 'Africa', 'AS' => 'Oceania', 'AD' => 'Europe',
+	'AO' => 'Africa', 'AI' => 'America', 'AG' => 'America', 'AR' => 'America', 'AM' => 'Asia',
+	'AW' => 'America', 'AU' => 'Oceania', 'AT' => 'Europe', 'AZ' => 'Asia', 'BS' => 'America',
+	'BH' => 'Middle East', 'BD' => 'Asia', 'BB' => 'America', 'BY' => 'Europe', 'BE' => 'Europe',
+	'BZ' => 'America', 'BJ' => 'Africa', 'BM' => 'America', 'BT' => 'Asia', 'BO' => 'America',
+	'BQ' => 'America', 'BA' => 'Europe', 'BW' => 'Africa', 'BR' => 'America', 'VG' => 'America',
+	'BN' => 'Asia', 'BG' => 'Europe', 'BF' => 'Africa', 'BI' => 'Africa', 'CV' => 'Africa',
+	'KH' => 'Asia', 'CM' => 'Africa', 'CA' => 'America', 'KY' => 'America', 'CF' => 'Africa',
+	'TD' => 'Africa', 'CL' => 'America', 'CN' => 'Asia', 'CX' => 'Asia', 'CO' => 'America',
+	'KM' => 'Africa', 'CG' => 'Africa', 'CD' => 'Africa', 'CK' => 'Oceania', 'CR' => 'America',
+	'HR' => 'Europe', 'CU' => 'America', 'CW' => 'America', 'CY' => 'Europe', 'CZ' => 'Europe',
+	'DK' => 'Europe', 'DJ' => 'Africa', 'DM' => 'America', 'DO' => 'America', 'EC' => 'America',
+	'EG' => 'Africa', 'SV' => 'America', 'GQ' => 'Africa', 'ER' => 'Africa', 'EE' => 'Europe',
+	'SZ' => 'Africa', 'ET' => 'Africa', 'FK' => 'America', 'FO' => 'Europe', 'FJ' => 'Oceania',
+	'FI' => 'Europe', 'FR' => 'Europe', 'GF' => 'America', 'PF' => 'Oceania', 'GA' => 'Africa',
+	'GM' => 'Africa', 'GE' => 'Asia', 'DE' => 'Europe', 'GH' => 'Africa', 'GI' => 'Europe',
+	'GR' => 'Europe', 'GL' => 'America', 'GD' => 'America', 'GP' => 'America', 'GU' => 'Oceania',
+	'GT' => 'America', 'GG' => 'Europe', 'GN' => 'Africa', 'GW' => 'Africa', 'GY' => 'America',
+	'HT' => 'America', 'HN' => 'America', 'HK' => 'Asia', 'HU' => 'Europe', 'IS' => 'Europe',
+	'IN' => 'Asia', 'ID' => 'Asia', 'IR' => 'Middle East', 'IQ' => 'Middle East', 'IE' => 'Europe',
+	'IM' => 'Europe', 'IL' => 'Middle East', 'IT' => 'Europe', 'CI' => 'Africa', 'JM' => 'America',
+	'JP' => 'Asia', 'JE' => 'Europe', 'JO' => 'Middle East', 'KZ' => 'Asia', 'KE' => 'Africa',
+	'KI' => 'Oceania', 'KP' => 'Asia', 'KR' => 'Asia', 'KW' => 'Middle East', 'KG' => 'Asia',
+	'LA' => 'Asia', 'LV' => 'Europe', 'LB' => 'Middle East', 'LS' => 'Africa', 'LR' => 'Africa',
+	'LY' => 'Africa', 'LI' => 'Europe', 'LT' => 'Europe', 'LU' => 'Europe', 'MO' => 'Asia',
+	'MG' => 'Africa', 'MW' => 'Africa', 'MY' => 'Asia', 'MV' => 'Asia', 'ML' => 'Africa',
+	'MT' => 'Europe', 'MH' => 'Oceania', 'MQ' => 'America', 'MR' => 'Africa', 'MU' => 'Africa',
+	'YT' => 'Africa', 'MX' => 'America', 'FM' => 'Oceania', 'MD' => 'Europe', 'MC' => 'Europe',
+	'MN' => 'Asia', 'ME' => 'Europe', 'MS' => 'America', 'MA' => 'Africa', 'MZ' => 'Africa',
+	'MM' => 'Asia', 'NA' => 'Africa', 'NR' => 'Oceania', 'NP' => 'Asia', 'NL' => 'Europe',
+	'NC' => 'Oceania', 'NZ' => 'Oceania', 'NI' => 'America', 'NE' => 'Africa', 'NG' => 'Africa',
+	'NU' => 'Oceania', 'NF' => 'Oceania', 'MK' => 'Europe', 'MP' => 'Oceania', 'NO' => 'Europe',
+	'OM' => 'Middle East', 'PK' => 'Asia', 'PW' => 'Oceania', 'PS' => 'Middle East', 'PA' => 'America',
+	'PG' => 'Oceania', 'PY' => 'America', 'PE' => 'America', 'PH' => 'Asia', 'PN' => 'Oceania',
+	'PL' => 'Europe', 'PT' => 'Europe', 'PR' => 'America', 'QA' => 'Middle East', 'RE' => 'Africa',
+	'RO' => 'Europe', 'RU' => 'Europe', 'RW' => 'Africa', 'BL' => 'America', 'SH' => 'Africa',
+	'KN' => 'America', 'LC' => 'America', 'MF' => 'America', 'PM' => 'America', 'VC' => 'America',
+	'WS' => 'Oceania', 'SM' => 'Europe', 'ST' => 'Africa', 'SA' => 'Middle East', 'SN' => 'Africa',
+	'RS' => 'Europe', 'SC' => 'Africa', 'SL' => 'Africa', 'SG' => 'Asia', 'SX' => 'America',
+	'SK' => 'Europe', 'SI' => 'Europe', 'SB' => 'Oceania', 'SO' => 'Africa', 'ZA' => 'Africa',
+	'SS' => 'Africa', 'ES' => 'Europe', 'LK' => 'Asia', 'SD' => 'Africa', 'SR' => 'America',
+	'SJ' => 'Europe', 'SE' => 'Europe', 'CH' => 'Europe', 'SY' => 'Middle East', 'TW' => 'Asia',
+	'TJ' => 'Asia', 'TZ' => 'Africa', 'TH' => 'Asia', 'TL' => 'Asia', 'TG' => 'Africa',
+	'TK' => 'Oceania', 'TO' => 'Oceania', 'TT' => 'America', 'TN' => 'Africa', 'TR' => 'Asia',
+	'TM' => 'Asia', 'TC' => 'America', 'TV' => 'Oceania', 'UG' => 'Africa', 'UA' => 'Europe',
+	'AE' => 'Middle East', 'GB' => 'Europe', 'US' => 'America', 'UM' => 'Oceania', 'UY' => 'America',
+	'UZ' => 'Asia', 'VU' => 'Oceania', 'VA' => 'Europe', 'VE' => 'America', 'VN' => 'Asia',
+	'VI' => 'America', 'WF' => 'Oceania', 'EH' => 'Africa', 'YE' => 'Middle East', 'ZM' => 'Africa',
+	'ZW' => 'Africa',
+));
+
+/* Display order used everywhere (matches the AirVPN website listing). */
+define('VPP_AIRVPN_CONTINENT_ORDER', array('America', 'Asia', 'Europe', 'Oceania', 'Africa', 'Middle East', 'Other'));
+
+function vpp_airvpn_continent($cc) {
+	$cc = strtoupper($cc);
+	return VPP_AIRVPN_CONTINENTS[$cc] ?? 'Other';
+}
+
 function vpp_airvpn_key() {
 	return trim((string)config_get_path('installedpackages/vpn_providers/settings/airvpn_api_key', ''));
 }
@@ -97,20 +160,28 @@ function vpp_airvpn_parse_status($json) {
 		if (($s['health'] ?? '') !== 'ok') {
 			continue;
 		}
+		$name = trim((string)($s['name'] ?? ''));
+		if ($name === '') {
+			$name = $host;
+		}
+		$cc = strtoupper((string)($s['country_code'] ?? '??'));
 		$list[] = array(
 			'host' => $host,
-			'cc' => strtoupper((string)($s['country_code'] ?? '??')),
+			'cc' => $cc,
 			'country' => trim((string)($s['country_name'] ?? '')),
-			'name' => trim((string)($s['name'] ?? '')),
+			'name' => $name,
 			'load' => (int)($s['currentload'] ?? -1),
 			'ip' => (string)($s['ip_v4_in1'] ?? ''),
+			'continent' => vpp_airvpn_continent($cc),
 		);
 	}
 	if (empty($list)) {
 		return array('error' => 'no healthy AirVPN servers returned by the API');
 	}
 	usort($list, function ($a, $b) {
-		return strcmp($a['country'], $b['country']) ?: ($a['load'] <=> $b['load']);
+		$ca = array_search($a['continent'], VPP_AIRVPN_CONTINENT_ORDER, true);
+		$cb = array_search($b['continent'], VPP_AIRVPN_CONTINENT_ORDER, true);
+		return ($ca <=> $cb) ?: (strcmp($a['country'], $b['country']) ?: ($a['load'] <=> $b['load']));
 	});
 	return array('list' => $list);
 }
