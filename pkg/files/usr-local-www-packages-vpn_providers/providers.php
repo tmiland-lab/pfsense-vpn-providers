@@ -21,6 +21,50 @@ function vpp_post($key) {
 	return str_replace(array("\r", "\0"), '', $v);
 }
 
+/* Routing extras (gateway group + priority, outbound NAT) shared by the
+   AirVPN quick-add and .ovpn import forms. */
+function vpp_routing_opts() {
+	$group = vpp_post('gwgroup_existing');
+	if ($group === '__new__') {
+		$group = trim(vpp_post('gwgroup_new'));
+	}
+	$opts = array('gateway_group' => $group, 'gateway_group_weight' => vpp_post('gwgroup_prio'));
+	if (vpp_post('natout') === '1') {
+		$src = trim(vpp_post('natout_src'));
+		if ($src === '') {
+			$src = vpp_lan_cidr();
+		}
+		$opts['nat_outbound'] = 1;
+		$opts['nat_src'] = $src;
+	}
+	return $opts;
+}
+
+/* The four routing form rows; $p is a unique DOM id prefix per form. */
+function vpp_routing_rows($p) {
+	$html = '				<tr><td><strong>' . gettext('Gateway group') . '</strong><br /><span class="text-muted">' . gettext('add the new gateways to a load-balancing / failover group') . '</span></td>
+					<td>
+						<select class="form-control" name="gwgroup_existing" id="' . $p . '-gwgroup-exist">
+							<option value="">' . gettext('- none -') . '</option>';
+	foreach (vpp_gateway_groups() as $gname => $gdescr) {
+		$html .= '
+							<option value="' . htmlspecialchars($gname) . '">' . htmlspecialchars($gdescr !== $gname ? $gname . ' (' . $gdescr . ')' : $gname) . '</option>';
+	}
+	$html .= '
+							<option value="__new__">' . gettext('- new group -') . '</option>
+						</select>
+						<input class="form-control" type="text" name="gwgroup_new" id="' . $p . '-gwgroup-new" value="VPN_Group" style="display:none" maxlength="63" placeholder="' . gettext('group name') . '" />
+					</td></tr>
+				<tr><td><strong>' . gettext('Priority (weight)') . '</strong><br /><span class="text-muted">' . gettext('gateway weight for the group, 1-500') . '</span></td>
+					<td><input class="form-control" type="number" name="gwgroup_prio" id="' . $p . '-gwgroup-prio" min="1" max="500" value="1" style="width:120px" /></td></tr>
+				<tr><td><strong>' . gettext('Outbound NAT') . '</strong><br /><span class="text-muted">' . gettext('route LAN traffic out of this tunnel (advanced NAT, same style as your existing AirVPN rules)') . '</span></td>
+					<td>
+						<label class="checkbox-inline"><input type="checkbox" name="natout" id="' . $p . '-natout" value="1" /> ' . gettext('Add outbound NAT rule') . '</label>
+						<input class="form-control" type="text" name="natout_src" id="' . $p . '-natout-src" value="' . htmlspecialchars(vpp_lan_cidr()) . '" style="display:none;width:200px;margin-top:6px" placeholder="' . gettext('LAN subnet, e.g. 192.168.1.0/24') . '" />
+					</td></tr>';
+	return $html;
+}
+
 $done = null;
 $input_errors = array();
 
@@ -37,7 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 			$input_errors[] = gettext('Name and .ovpn config are both required.');
 		} else {
 			$parsed = vpp_parse_ovpn($text);
-			$plan = vpp_plan_create($name, $parsed, array('provider' => 'import'));
+			$plan = vpp_plan_create($name, $parsed, array('provider' => 'import') + vpp_routing_opts());
 			if (isset($plan['error'])) {
 				$input_errors[] = $plan['error'];
 			} else {
@@ -56,20 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 		$tls = vpp_post('tlskey');
 		$ipv = (vpp_post('ipv4') === '1' ? '4' : '') . (vpp_post('ipv6') === '1' ? '6' : '');
 		$enabled = vpp_post('enabled') === '1';
-		/* routing extras: gateway group membership + priority, outbound NAT */
-		$opt_group = vpp_post('gwgroup_existing');
-		if ($opt_group === '__new__') {
-			$opt_group = trim(vpp_post('gwgroup_new'));
-		}
-		$gw_opts = array('gateway_group' => $opt_group, 'gateway_group_weight' => vpp_post('gwgroup_prio'));
-		$nat_src = vpp_post('natout_src');
-		if (vpp_post('natout') === '1') {
-			if (trim($nat_src) === '') {
-				$nat_src = vpp_lan_cidr();
-			}
-			$gw_opts['nat_outbound'] = 1;
-			$gw_opts['nat_src'] = trim($nat_src);
-		}
+		$gw_opts = vpp_routing_opts();
 		if ($name === '') {
 			$input_errors[] = gettext('Name is required.');
 		}
@@ -338,24 +369,7 @@ display_top_tabs($tab_array);
 					</td></tr>
 				<tr><td><strong><?= gettext('Start enabled') ?></strong><br /><span class="text-muted"><?= gettext('create the tunnel enabled (default: disabled)') ?></span></td>
 					<td><label class="checkbox-inline"><input type="checkbox" name="enabled" value="1" /> <?= gettext('Enable immediately') ?></label></td></tr>
-				<tr><td><strong><?= gettext('Gateway group') ?></strong><br /><span class="text-muted"><?= gettext('add the new gateways to a load-balancing / failover group') ?></span></td>
-					<td>
-						<select class="form-control" name="gwgroup_existing" id="airvpn-gwgroup-exist">
-							<option value=""><?= gettext('- none -') ?></option>
-<?php foreach (vpp_gateway_groups() as $gname => $gdescr): ?>
-							<option value="<?= htmlspecialchars($gname) ?>"><?= htmlspecialchars($gdescr !== $gname ? $gname . ' (' . $gdescr . ')' : $gname) ?></option>
-<?php endforeach; ?>
-							<option value="__new__"><?= gettext('- new group -') ?></option>
-						</select>
-						<input class="form-control" type="text" name="gwgroup_new" id="airvpn-gwgroup-new" value="VPN_Group" style="display:none" maxlength="63" placeholder="<?= gettext('group name') ?>" />
-					</td></tr>
-				<tr><td><strong><?= gettext('Priority (weight)') ?></strong><br /><span class="text-muted"><?= gettext('gateway weight for the group, 1-500') ?></span></td>
-					<td><input class="form-control" type="number" name="gwgroup_prio" id="airvpn-gwgroup-prio" min="1" max="500" value="1" style="width:120px" /></td></tr>
-				<tr><td><strong><?= gettext('Outbound NAT') ?></strong><br /><span class="text-muted"><?= gettext('route LAN traffic out of this tunnel (advanced NAT, same style as your existing AirVPN rules)') ?></span></td>
-					<td>
-						<label class="checkbox-inline"><input type="checkbox" name="natout" id="airvpn-natout" value="1" /> <?= gettext('Add outbound NAT rule') ?></label>
-						<input class="form-control" type="text" name="natout_src" id="airvpn-natout-src" value="<?= htmlspecialchars(vpp_lan_cidr()) ?>" style="display:none;width:200px;margin-top:6px" placeholder="LAN subnet, e.g. 192.168.1.0/24" />
-					</td></tr>
+<?= vpp_routing_rows('airvpn') ?>
 			</table>
 			<p class="text-muted"><?= gettext('Reuses the installed AirVPN_CA, the shared tls-crypt key and the client certificate of your existing AirVPN tunnels - no credentials needed. The tunnel connects via the country server hostname (e.g. de3.vpn.airdns.org); the API entry IPs are not connectable.') ?></p>
 <?php if (isset($airvpn_servers['list'])): ?>
@@ -386,28 +400,24 @@ function vppDeriveName() {
 		nm.value = 'AirVPN_' + cc;
 	}
 }
-function vppGwgroupToggle() {
-	var exist = document.getElementById('airvpn-gwgroup-exist');
-	var fresh = document.getElementById('airvpn-gwgroup-new');
-	var prio = document.getElementById('airvpn-gwgroup-prio');
+function vppGwgroupToggle(p) {
+	var exist = document.getElementById(p + '-gwgroup-exist');
+	var fresh = document.getElementById(p + '-gwgroup-new');
+	var prio = document.getElementById(p + '-gwgroup-prio');
 	if (!exist || !fresh) { return; }
 	fresh.style.display = (exist.value === '__new__') ? '' : 'none';
 	if (prio) {
 		prio.disabled = (exist.value === '' && fresh.value === '');
 	}
 }
-function vppNatToggle() {
-	var on = document.getElementById('airvpn-natout');
-	var src = document.getElementById('airvpn-natout-src');
+function vppNatToggle(p) {
+	var on = document.getElementById(p + '-natout');
+	var src = document.getElementById(p + '-natout-src');
 	if (on && src) {
 		src.style.display = on.checked && src.value !== '' ? '' : 'none';
 		src.disabled = !on.checked;
 	}
 }
-var _gwe = document.getElementById('airvpn-gwgroup-exist');
-if (_gwe) { _gwe.addEventListener('change', vppGwgroupToggle); vppGwgroupToggle(); }
-var _nate = document.getElementById('airvpn-natout');
-if (_nate) { _nate.addEventListener('change', vppNatToggle); }
 </script>
 <?php endif; ?>
 			<button type="submit" class="btn btn-primary"><?= gettext('Create (disabled)') ?></button>
@@ -428,10 +438,19 @@ if (_nate) { _nate.addEventListener('change', vppNatToggle); }
 					<td><input type="file" name="ovpnfile" class="form-control" /></td></tr>
 				<tr><td><strong><?= gettext('.ovpn contents') ?></strong></td>
 					<td><textarea class="form-control" name="ovpntext" rows="6" placeholder="client&#10;remote vpn.example.com 1194 udp4&#10;..."></textarea></td></tr>
+<?= vpp_routing_rows('imp') ?>
 			</table>
 			<button type="submit" class="btn btn-primary"><?= gettext('Parse and create (disabled)') ?></button>
 		</form>
 	</div>
 </div>
 
+<script>
+['airvpn', 'imp'].forEach(function (p) {
+	var gwe = document.getElementById(p + '-gwgroup-exist');
+	if (gwe) { gwe.addEventListener('change', function () { vppGwgroupToggle(p); }); vppGwgroupToggle(p); }
+	var nate = document.getElementById(p + '-natout');
+	if (nate) { nate.addEventListener('change', function () { vppNatToggle(p); }); }
+});
+</script>
 <?php include("foot.inc");

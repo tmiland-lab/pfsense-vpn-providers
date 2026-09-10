@@ -34,7 +34,7 @@ up exactly what was created and nothing else.
 ## Install (CLI)
 
 ```
-pkg add https://tmiland-lab.github.io/pfsense-vpn-providers/repo/All/pfSense-pkg-vpn-providers-0.1.9.pkg
+pkg add https://tmiland-lab.github.io/pfsense-vpn-providers/repo/All/pfSense-pkg-vpn-providers-0.1.10.pkg
 ```
 
 Then **VPN → VPN Providers**. Nothing is written until you enable
