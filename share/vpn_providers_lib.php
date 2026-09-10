@@ -74,6 +74,90 @@ function vpp_registry_save($reg) {
 }
 
 /* ------------------------------------------------------------------
+ * AirVPN API: server list for the quick-add picker
+ * ------------------------------------------------------------------ */
+
+define('VPP_AIRVPN_STATUS_URL', 'https://airvpn.org/api/status/');
+
+function vpp_airvpn_key() {
+	return trim((string)config_get_path('installedpackages/vpn_providers/settings/airvpn_api_key', ''));
+}
+
+function vpp_airvpn_parse_status($json) {
+	$j = json_decode($json, true);
+	if (!is_array($j) || !isset($j['servers']) || !is_array($j['servers'])) {
+		return array('error' => 'unexpected AirVPN API response');
+	}
+	$list = array();
+	foreach ($j['servers'] as $s) {
+		$host = trim((string)($s['public_name'] ?? ''));
+		if ($host === '') {
+			continue;
+		}
+		if (($s['health'] ?? '') !== 'ok') {
+			continue;
+		}
+		$list[] = array(
+			'host' => $host,
+			'cc' => strtoupper((string)($s['country_code'] ?? '??')),
+			'country' => trim((string)($s['country_name'] ?? '')),
+			'name' => trim((string)($s['name'] ?? '')),
+			'load' => (int)($s['currentload'] ?? -1),
+			'ip' => (string)($s['ip_v4_in1'] ?? ''),
+		);
+	}
+	if (empty($list)) {
+		return array('error' => 'no healthy AirVPN servers returned by the API');
+	}
+	usort($list, function ($a, $b) {
+		return strcmp($a['country'], $b['country']) ?: ($a['load'] <=> $b['load']);
+	});
+	return array('list' => $list);
+}
+
+function vpp_airvpn_servers($force = false) {
+	if (!function_exists('curl_init')) {
+		return array('error' => 'PHP curl extension not available');
+	}
+	$cache = VPP_STATE . '/airvpn_servers.json';
+	if (!$force && file_exists($cache) && (time() - filemtime($cache)) < 600) {
+		$c = json_decode(file_get_contents($cache), true);
+		if (is_array($c) && isset($c['list'])) {
+			return $c;
+		}
+	}
+	$key = vpp_airvpn_key();
+	if ($key === '') {
+		return array('error' => 'no AirVPN API key configured - set it in VPN Providers settings');
+	}
+	$ch = curl_init(VPP_AIRVPN_STATUS_URL . '?key=' . urlencode($key));
+	curl_setopt_array($ch, array(
+		CURLOPT_RETURNTRANSFER => true,
+		CURLOPT_SSL_VERIFYPEER => true,
+		CURLOPT_TIMEOUT => 12,
+		CURLOPT_CONNECTTIMEOUT => 8,
+		CURLOPT_FOLLOWLOCATION => true,
+		CURLOPT_MAXREDIRS => 2,
+		CURLOPT_USERAGENT => 'pfsense-vpn-providers',
+	));
+	$body = curl_exec($ch);
+	$err = curl_errno($ch);
+	curl_close($ch);
+	if ($err !== 0 || $body === false || $body === '') {
+		return array('error' => 'AirVPN API unreachable (curl errno ' . $err . ')');
+	}
+	$rows = vpp_airvpn_parse_status($body);
+	if (isset($rows['error'])) {
+		return $rows;
+	}
+	if (!is_dir(VPP_STATE)) {
+		mkdir(VPP_STATE, 0755, true);
+	}
+	file_put_contents($cache, json_encode($rows, JSON_UNESCAPED_SLASHES));
+	return $rows;
+}
+
+/* ------------------------------------------------------------------
  * .ovpn parsing
  * ------------------------------------------------------------------ */
 

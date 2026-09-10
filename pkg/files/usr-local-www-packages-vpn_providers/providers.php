@@ -53,33 +53,76 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 		}
 	} elseif ($action === 'add_airvpn') {
 		$name = trim(vpp_post('name'));
-		$cc = strtoupper(trim(vpp_post('country')));
 		$tls = vpp_post('tlskey');
-		if ($name === '' || $cc === '' || trim($tls) === '') {
-			$input_errors[] = gettext('Name, country code and the tls-crypt key are required.');
+		if ($name === '' || trim($tls) === '') {
+			$input_errors[] = gettext('Name and the tls-crypt key are required.');
 		} else {
-			$host = strtolower($cc) . '3.vpn.airdns.org';
-			$parsed = vpp_parse_ovpn("client\nremote {$host} 443 udp4\nauth-user-pass\n");
-			$parsed['tls'] = trim($tls) . "\n";
-			$parsed['tls_type'] = 'crypt';
-			$plan = vpp_plan_create($name, $parsed, array('provider' => 'airvpn'));
-			if (isset($plan['error'])) {
-				$input_errors[] = $plan['error'];
-			} else {
-				/* reuse the installed AirVPN CA instead of importing one */
-				$existing = vpp_find_ca_by_descr('AirVPN_CA');
-				if ($existing !== '') {
-					$plan['caref'] = $existing;
-					$plan['client']['caref'] = $existing;
-					$plan['ca_item'] = null;
-				}
-				$r = vpp_apply_create($plan);
-				if (isset($r['error'])) {
-					$input_errors[] = $r['error'];
-				} elseif (isset($r['dryrun'])) {
-					$done = array('dryrun', sprintf(gettext('Dry run - nothing written. Enable "apply changes live" in settings to create: %s (%s)'), $plan['description'], $host));
+			$servers = vpp_airvpn_servers();
+			if (isset($servers['error'])) {
+				/* fall back to the manual country-code host when the API is unavailable */
+				$cc = strtoupper(trim(vpp_post('country')));
+				if ($cc === '' || !preg_match('/^[A-Z]{2}$/', $cc)) {
+					$input_errors[] = gettext('Pick a server from the list, or enter a 2-letter country code.');
 				} else {
-					$done = array('ok', sprintf(gettext('Created %s (%s, disabled).'), $plan['description'], $host));
+					$host = strtolower($cc) . '3.vpn.airdns.org';
+					$parsed = vpp_parse_ovpn("client\nremote {$host} 443 udp4\nauth-user-pass\n");
+					$parsed['tls'] = trim($tls) . "\n";
+					$parsed['tls_type'] = 'crypt';
+					$plan = vpp_plan_create($name, $parsed, array('provider' => 'airvpn'));
+					if (isset($plan['error'])) {
+						$input_errors[] = $plan['error'];
+					} else {
+						$existing = vpp_find_ca_by_descr('AirVPN_CA');
+						if ($existing !== '') {
+							$plan['caref'] = $existing;
+							$plan['client']['caref'] = $existing;
+							$plan['ca_item'] = null;
+						}
+						$r = vpp_apply_create($plan);
+						if (isset($r['error'])) {
+							$input_errors[] = $r['error'];
+						} elseif (isset($r['dryrun'])) {
+							$done = array('dryrun', sprintf(gettext('Dry run - nothing written. Enable "apply changes live" in settings to create: %s (%s)'), $plan['description'], $host));
+						} else {
+							$done = array('ok', sprintf(gettext('Created %s (%s, disabled).'), $plan['description'], $host));
+						}
+					}
+				}
+			} else {
+				$host = vpp_post('server');
+				$valid = array();
+				foreach ($servers['list'] as $s) {
+					$valid[$s['host']] = $s;
+				}
+				if (!isset($valid[$host])) {
+					$input_errors[] = gettext('Pick a server from the list.');
+				} else {
+					$srv = $valid[$host];
+					/* connect by entry IP (what the AirVPN monitor uses) - public_name
+					   is a display name, not always a resolvable connect hostname */
+					$remote = $srv['ip'] !== '' ? $srv['ip'] : $srv['host'];
+					$parsed = vpp_parse_ovpn("client\nremote {$remote} 443 udp4\nauth-user-pass\n");
+					$parsed['tls'] = trim($tls) . "\n";
+					$parsed['tls_type'] = 'crypt';
+					$plan = vpp_plan_create($name, $parsed, array('provider' => 'airvpn'));
+					if (isset($plan['error'])) {
+						$input_errors[] = $plan['error'];
+					} else {
+						$existing = vpp_find_ca_by_descr('AirVPN_CA');
+						if ($existing !== '') {
+							$plan['caref'] = $existing;
+							$plan['client']['caref'] = $existing;
+							$plan['ca_item'] = null;
+						}
+						$r = vpp_apply_create($plan);
+						if (isset($r['error'])) {
+							$input_errors[] = $r['error'];
+						} elseif (isset($r['dryrun'])) {
+							$done = array('dryrun', sprintf(gettext('Dry run - nothing written. Enable "apply changes live" in settings to create: %s (%s)'), $plan['description'], $remote));
+						} else {
+							$done = array('ok', sprintf(gettext('Created %s (%s, disabled).'), $plan['description'], $remote));
+						}
+					}
 				}
 			}
 		}
@@ -180,18 +223,34 @@ display_top_tabs($tab_array);
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?= gettext('AirVPN quick add') ?></h2></div>
 	<div class="panel-body">
+<?php $airvpn_servers = vpp_airvpn_servers(isset($_GET['refresh_servers']) && $_GET['refresh_servers'] === '1'); ?>
+<?php if (isset($airvpn_servers['error'])): ?>
+		<?= print_info_box(htmlspecialchars($airvpn_servers['error']) . ' - ' . gettext('falling back to a manual country code.'), 'warning') ?>
+<?php endif; ?>
 		<form method="post">
 			<input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['request_token']) ?>" />
 			<input type="hidden" name="action" value="add_airvpn" />
 			<table class="table">
 				<tr><td style="width:25%"><strong><?= gettext('Name') ?></strong><br /><span class="text-muted"><?= gettext('e.g. AirVPN Sweden') ?></span></td>
 					<td><input class="form-control" type="text" name="name" maxlength="40" autocomplete="off" required /></td></tr>
+<?php if (isset($airvpn_servers['list'])): ?>
+				<tr><td><strong><?= gettext('Server') ?></strong><br /><span class="text-muted"><?= sprintf(gettext('%d healthy servers from the AirVPN API'), count($airvpn_servers['list'])) . ' <a href="?refresh_servers=1">' . gettext('refresh') . '</a>' ?></span></td>
+					<td>
+						<select class="form-control" name="server" required>
+							<option value="" selected><?= gettext('select a server') ?></option>
+<?php foreach ($airvpn_servers['list'] as $s): ?>
+							<option value="<?= htmlspecialchars($s['host']) ?>">[<?= htmlspecialchars($s['cc']) ?>] <?= htmlspecialchars($s['country']) ?> - <?= htmlspecialchars($s['name']) ?> (<?= (int)$s['load'] ?>%, <?= htmlspecialchars($s['ip']) ?>)</option>
+<?php endforeach; ?>
+						</select>
+					</td></tr>
+<?php else: ?>
 				<tr><td><strong><?= gettext('Country code') ?></strong><br /><span class="text-muted"><?= gettext('SE, DE, US, ... - server <cc>3.vpn.airdns.org') ?></span></td>
 					<td><input class="form-control" type="text" name="country" maxlength="3" autocomplete="off" required /></td></tr>
+<?php endif; ?>
 				<tr><td><strong><?= gettext('tls-crypt key') ?></strong><br /><span class="text-muted"><?= gettext('paste the &lt;tls-crypt&gt; block from any AirVPN .ovpn export') ?></span></td>
 					<td><textarea class="form-control" name="tlskey" rows="5" placeholder="-----BEGIN OpenVPN Static key V1-----"></textarea></td></tr>
 			</table>
-			<p class="text-muted"><?= gettext('Reuses the installed AirVPN_CA and the AirVPN API key from settings. The remote list is managed by the AirVPN Remotes monitor package once the client is enabled.') ?></p>
+			<p class="text-muted"><?= gettext('Reuses the installed AirVPN_CA. The remote list is managed by the AirVPN Remotes monitor package once the client is enabled.') ?></p>
 			<button type="submit" class="btn btn-primary"><?= gettext('Create (disabled)') ?></button>
 		</form>
 	</div>
