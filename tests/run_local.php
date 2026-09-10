@@ -142,6 +142,7 @@ check(!isset($qplan['error']), 'quick-add plan ok without CA block');
 check($qplan['caref'] === 'aaaairvpnca01', 'quick-add reuses AirVPN_CA');
 check($qplan['ca_item'] === null, 'no CA import planned');
 check($qplan['client']['server_addr'] === '62.102.148.141', 'quick-add remote = entry IP');
+check($qplan['client']['data_ciphers'] === 'AES-256-GCM,AES-256-CBC' && $qplan['client']['data_ciphers_fallback'] === 'AES-256-CBC', 'no-cipher config gets valid data-ciphers defaults (OpenVPN 2.6 empty-line fix)');
 
 echo "== IP protocol selection (v4 / v6 / both) ==\n";
 check($plan['client']['create_gw'] === 'both' && count($plan['gateways']) === 2, 'default creates v4+v6 gateways');

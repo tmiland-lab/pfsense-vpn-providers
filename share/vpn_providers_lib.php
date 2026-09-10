@@ -581,13 +581,19 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 	if ($certref !== '') {
 		$client['certref'] = $certref;
 	}
-	/* pfSense stores cipher lists as comma-joined STRINGS - a PHP list here
-	   serializes as <0>...</0> which is invalid XML */
+	/* pfSense stores cipher lists as comma-joined STRINGS (writes them into
+	   config.ovpn colon-separated). OpenVPN 2.6 fails to start when the line
+	   has no argument, so ALWAYS provide a value - defaulting to the cipher
+	   set the installed AirVPN tunnels actually use. */
 	if (!empty($parsed['data_ciphers'])) {
 		$client['data_ciphers'] = implode(',', $parsed['data_ciphers']);
+	} else {
+		$client['data_ciphers'] = 'AES-256-GCM,AES-256-CBC';
 	}
-	if (!empty($parsed['cipher']) && empty($parsed['data_ciphers'])) {
+	if (!empty($parsed['cipher'])) {
 		$client['data_ciphers_fallback'] = $parsed['cipher'];
+	} else {
+		$client['data_ciphers_fallback'] = 'AES-256-CBC';
 	}
 	if (!empty($parsed['tls'])) {
 		$client['tls'] = base64_encode($parsed['tls']);
