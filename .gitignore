@@ -1,0 +1,4 @@
+# local-only agent documentation
+AGENTS.md
+*.ovpn
+*.local

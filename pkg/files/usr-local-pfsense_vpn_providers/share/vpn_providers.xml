@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE packagegui SYSTEM "../schema/packages.dtd">
+<packagegui>
+	<name>vpn_providers</name>
+	<version>0.1.0</version>
+	<title>VPN Providers</title>
+	<menu>
+		<name>VPN Providers</name>
+		<tooltiptext>Add and remove VPN provider clients (OpenVPN) - config import and provider quick-add</tooltiptext>
+		<section>VPN</section>
+		<url>/packages/vpn_providers/providers.php</url>
+	</menu>
+</packagegui>
