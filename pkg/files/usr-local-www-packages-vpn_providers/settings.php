@@ -7,6 +7,11 @@ require_once("guiconfig.inc");
 
 $pkg_name = 'vpn_providers';
 
+$tab_array = array(
+	array(gettext('Clients'), false, '/packages/vpn_providers/providers.php'),
+	array(gettext('Settings'), true, '/packages/vpn_providers/settings.php'),
+);
+
 $fields = array(
 	'apply_live'     => array('Apply changes live (write config.xml - clients are still created disabled)', 'select'),
 	'airvpn_api_key' => array('AirVPN API key', 'password')
@@ -45,6 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 
 $pgtitle = array(gettext('VPN'), gettext('VPN Providers'), gettext('Settings'));
 include("head.inc");
+display_top_tabs($tab_array);
 
 if ($saved) {
 	print_info_box(gettext('Settings saved.'), 'success');

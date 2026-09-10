@@ -11,6 +11,11 @@ require_once($base . '/share/vpn_providers_lib.php');
 
 $apply_live = vpp_apply_live();
 
+$tab_array = array(
+	array(gettext('Clients'), true, '/packages/vpn_providers/providers.php'),
+	array(gettext('Settings'), false, '/packages/vpn_providers/settings.php'),
+);
+
 function vpp_post($key) {
 	$v = $_POST[$key] ?? '';
 	return str_replace(array("\r", "\0"), '', $v);
@@ -97,9 +102,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 
 $pgtitle = array(gettext('VPN'), gettext('VPN Providers'));
 include("head.inc");
+display_top_tabs($tab_array);
 ?>
 <?php if (!$apply_live): ?>
-	<?= print_info_box(gettext('Dry-run mode: nothing is written to the configuration. Enable "apply changes live" in the settings to create clients.'), 'info', null, true) ?>
+	<?= print_info_box(gettext('Dry-run mode: nothing is written to the configuration. Enable "apply changes live" in the ') . '<a href="settings.php">' . gettext('settings') . '</a> ' . gettext('to create clients.'), 'info', null, true) ?>
 <?php endif; ?>
 <?php if ($done !== null): ?>
 	<?= print_info_box(htmlspecialchars($done[1]), $done[0] === 'ok' ? 'success' : 'info', null, true) ?>
