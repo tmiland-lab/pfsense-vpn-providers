@@ -96,15 +96,24 @@ function vpp_parse_ovpn($text) {
 		if ($line === '' || $line[0] === '#' || $line[0] === ';') {
 			continue;
 		}
-		/* inline blocks */
+		/* inline blocks - the closing tag may be glued to content
+		   (-----END CERTIFICATE-----</ca>) so match containment, not position */
 		if (preg_match('/^<(ca|cert|key|tls-auth|tls-crypt)>/i', $line, $m)) {
 			$tag = strtolower($m[1]);
 			$buf = '';
-			while ($i < $n && stripos($lines[$i], '</' . $tag . '>') !== 0) {
-				$buf .= rtrim($lines[$i]) . "\n";
+			while ($i < $n) {
+				$cl = $lines[$i];
+				$pos = stripos($cl, '</' . $tag . '>');
+				if ($pos !== false) {
+					if ($pos > 0) {
+						$buf .= rtrim(substr($cl, 0, $pos)) . "\n";
+					}
+					$i++;
+					break;
+				}
+				$buf .= rtrim($cl) . "\n";
 				$i++;
 			}
-			$i++; /* closing tag */
 			$buf = trim($buf) . "\n";
 			if ($tag === 'ca') { $out['ca_pem'] = $buf; }
 			elseif ($tag === 'cert') { $out['cert_pem'] = $buf; }
