@@ -82,6 +82,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 		}
 		if ($name === '' || trim($tls) === '') {
 			$input_errors[] = gettext('The tls-crypt key is required - paste the &lt;tls-crypt&gt; block from an AirVPN .ovpn export.');
+		}
+		/* quick-add authenticates by reusing the client certificate of an
+		   existing AirVPN tunnel (same as the AirVPN_CA + tls-crypt reuse) */
+		$airvpn_caref = vpp_find_ca_by_descr('AirVPN_CA');
+		$airvpn_certref = vpp_find_airvpn_certref($airvpn_caref);
+		if ($airvpn_certref === '') {
+			$input_errors[] = gettext('No AirVPN client certificate found - create or import one AirVPN tunnel first; quick-add reuses its certificate to authenticate.');
+		}
+		if ($name === '' || trim($tls) === '' || $airvpn_certref === '') {
+			/* fall through to the error display below */
 		} else {
 			$servers = vpp_airvpn_servers();
 			if (isset($servers['error'])) {
@@ -91,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 					$input_errors[] = gettext('Pick a server from the list, or enter a 2-letter country code.');
 				} else {
 					$host = strtolower($cc) . '3.vpn.airdns.org';
-					$parsed = vpp_parse_ovpn("client\nremote {$host} 443 udp4\nauth-user-pass\n");
+					$parsed = vpp_parse_ovpn("client\nremote {$host} 443 udp4\n");
 					$parsed['tls'] = trim($tls) . "\n";
 					$parsed['tls_type'] = 'crypt';
 					$plan = vpp_plan_create($name, $parsed, array('provider' => 'airvpn', 'ipv' => $ipv, 'create_enabled' => $enabled) + $gw_opts);
@@ -127,7 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 					/* connect by entry IP (what the AirVPN monitor uses) - public_name
 					   is a display name, not always a resolvable connect hostname */
 					$remote = $srv['ip'] !== '' ? $srv['ip'] : $srv['host'];
-					$parsed = vpp_parse_ovpn("client\nremote {$remote} 443 udp4\nauth-user-pass\n");
+					$parsed = vpp_parse_ovpn("client\nremote {$remote} 443 udp4\n");
 					$parsed['tls'] = trim($tls) . "\n";
 					$parsed['tls_type'] = 'crypt';
 					$plan = vpp_plan_create($name, $parsed, array('provider' => 'airvpn', 'ipv' => $ipv, 'create_enabled' => $enabled) + $gw_opts);
@@ -342,7 +352,7 @@ display_top_tabs($tab_array);
 						<input class="form-control" type="text" name="natout_src" id="airvpn-natout-src" value="<?= htmlspecialchars(vpp_lan_cidr()) ?>" style="display:none;width:200px;margin-top:6px" placeholder="LAN subnet, e.g. 192.168.1.0/24" />
 					</td></tr>
 			</table>
-			<p class="text-muted"><?= gettext('Reuses the installed AirVPN_CA. The remote list is managed by the AirVPN Remotes monitor package once the client is enabled.') ?></p>
+			<p class="text-muted"><?= gettext('Reuses the installed AirVPN_CA, the shared tls-crypt key and the client certificate of your existing AirVPN tunnels - no credentials needed. Note: AirVPN rotates the tls-crypt key for new server generations - if a freshly created tunnel stays silent, regenerate your AirVPN .ovpn export and paste the current &lt;tls-crypt&gt; key above.') ?></p>
 <?php if (isset($airvpn_servers['list'])): ?>
 			<script>
 function vppFilterContinent() {

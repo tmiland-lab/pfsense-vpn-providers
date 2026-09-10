@@ -131,16 +131,30 @@ check($plan['gateways'][0]['name'] === 'PVD_AIRVPN_SWEDEN_V4', 'gateway v4 name'
 check($plan['gateways'][1]['ipprotocol'] === 'inet6', 'gateway v6');
 check($plan['interface']['if'] === 'ovpnc' . $plan['vpnid'], 'interface assignment');
 
-echo "== AirVPN quick-add reuses installed AirVPN_CA (no CA block in config) ==\n";
+echo "== AirVPN quick-add reuses installed AirVPN_CA + client cert (no CA block in config) ==\n";
 $airvpn_ca = array('refid' => 'aaaairvpnca01', 'descr' => 'AirVPN_CA', 'crt' => base64_encode('FAKECERT'));
-$GLOBALS['CFG'] = array('ca' => array($airvpn_ca), 'openvpn' => array('openvpn-client' => array()));
-$qa = vpp_parse_ovpn("client\nremote 62.102.148.141 443 udp4\nauth-user-pass\n");
+$airvpn_cert = array('refid' => 'aaaairvpncert0', 'descr' => 'AirVPN_cert', 'caref' => 'aaaairvpnca01', 'crt' => base64_encode('FAKECERT'), 'prv' => base64_encode('FAKEKEY'));
+$GLOBALS['CFG'] = array(
+	'ca' => array($airvpn_ca),
+	'cert' => array($airvpn_cert),
+	'openvpn' => array('openvpn-client' => array(array('description' => 'AirVPN_NO', 'caref' => 'aaaairvpnca01', 'certref' => 'aaaairvpncert0'))),
+);
+$qa = vpp_parse_ovpn("client\nremote 62.102.148.141 443 udp4\n");
 $qa['tls'] = "-----BEGIN OpenVPN Static key V1-----\nfake\n-----END OpenVPN Static key V1-----\n";
 $qa['tls_type'] = 'crypt';
+check(vpp_find_airvpn_certref('aaaairvpnca01') === 'aaaairvpncert0', 'certref reused from existing AirVPN client');
+check(vpp_find_airvpn_certref('') === '', 'certref reuse needs a CA');
+$GLOBALS['CFG']['openvpn']['openvpn-client'] = array();
+check(vpp_find_airvpn_certref('aaaairvpnca01') === 'aaaairvpncert0', 'certref falls back to the CA-issued AirVPN cert');
+$GLOBALS['CFG']['cert'] = array();
+check(vpp_find_airvpn_certref('aaaairvpnca01') === '', 'no cert on the CA -> no reuse');
+$GLOBALS['CFG']['cert'] = array($airvpn_cert);
 $qplan = vpp_plan_create('AirVPN Pick', $qa, array('provider' => 'airvpn'));
 check(!isset($qplan['error']), 'quick-add plan ok without CA block');
 check($qplan['caref'] === 'aaaairvpnca01', 'quick-add reuses AirVPN_CA');
 check($qplan['ca_item'] === null, 'no CA import planned');
+check($qplan['client']['certref'] === 'aaaairvpncert0' && $qplan['cert_item'] === null, 'quick-add reuses the AirVPN client cert (no user/pass)');
+check(!isset($qplan['client']['auth_user_pass']) || $qplan['client']['auth_user_pass'] === false, 'no auth_user_pass when reusing certs');
 check($qplan['client']['server_addr'] === '62.102.148.141', 'quick-add remote = entry IP');
 check($qplan['client']['data_ciphers'] === 'AES-256-GCM,AES-256-CBC' && $qplan['client']['data_ciphers_fallback'] === 'AES-256-CBC', 'no-cipher config gets valid data-ciphers defaults (OpenVPN 2.6 empty-line fix)');
 

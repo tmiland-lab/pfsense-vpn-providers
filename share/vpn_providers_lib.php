@@ -440,6 +440,35 @@ function vpp_find_ca_by_descr($descr) {
 	return '';
 }
 
+/* Find the client certificate an existing AirVPN tunnel uses (same CA), so
+   quick-add can authenticate by certificate instead of user/pass. */
+function vpp_find_airvpn_certref($caref) {
+	if ($caref === '') {
+		return '';
+	}
+	/* prefer the certref already in use by an AirVPN-named client on this CA */
+	foreach ((array)config_get_path('openvpn/openvpn-client', array()) as $c) {
+		if (strpos((string)($c['description'] ?? ''), 'AirVPN') === 0 &&
+				($c['caref'] ?? '') === $caref && ($c['certref'] ?? '') !== '') {
+			return $c['certref'];
+		}
+	}
+	/* fallback: a cert issued by this CA, AirVPN-named one first */
+	$fallback = '';
+	foreach ((array)config_get_path('cert', array()) as $cert) {
+		if (($cert['caref'] ?? '') !== $caref || ($cert['refid'] ?? '') === '') {
+			continue;
+		}
+		if (strpos(strtolower((string)($cert['descr'] ?? '')), 'airvpn') !== false) {
+			return $cert['refid'];
+		}
+		if ($fallback === '') {
+			$fallback = $cert['refid'];
+		}
+	}
+	return $fallback;
+}
+
 /* Reuse an existing CA with identical certificate content - importing
    several provider configs must not duplicate the same CA. */
 function vpp_find_ca_by_crt($pem) {
@@ -524,6 +553,15 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 			'crt' => base64_encode($parsed['cert_pem']),
 			'prv' => base64_encode($parsed['key_pem'])
 		);
+	} elseif (($opts['provider'] ?? '') === 'airvpn') {
+		/* AirVPN quick-add ships no cert+key: authenticate with the client
+		   certificate an existing AirVPN tunnel already uses. pfSense ignores
+		   a bare auth-user-pass flag, so a config without either would abort
+		   OpenVPN with "No client-side authentication method is specified". */
+		$certref = vpp_find_airvpn_certref($caref);
+		if ($certref === '') {
+			return array('error' => 'no AirVPN client certificate found - create or import one AirVPN tunnel first; quick-add reuses its certificate to authenticate');
+		}
 	}
 
 	/* custom options: pass through the provider directives pfSense has no
