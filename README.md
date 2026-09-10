@@ -27,14 +27,14 @@ up exactly what was created and nothing else.
   custom options
 - **AirVPN quick-add** — name + country code + the tls-crypt key from any AirVPN
   export → `xx3.vpn.airdns.org` client reusing the installed AirVPN CA; the
-  remote list is then managed by the [AirVPN Remotes monitor](https://github.com/tmiland/pfsense-airvpn-remotes)
+  remote list is then managed by the [AirVPN Remotes monitor](https://github.com/tmiland-lab/pfsense-airvpn-remotes)
 - More providers (Mullvad/Proton direct download) are stubbed for later — the
   import path already covers them manually
 
 ## Install (CLI)
 
 ```
-pkg add https://tmiland.github.io/pfsense-vpn-providers/repo/All/pfSense-pkg-vpn-providers-0.1.1.pkg
+pkg add https://tmiland-lab.github.io/pfsense-vpn-providers/repo/All/pfSense-pkg-vpn-providers-0.1.1.pkg
 ```
 
 Then **VPN → VPN Providers**. Nothing is written until you enable
