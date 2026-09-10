@@ -130,6 +130,18 @@ check($plan['gateways'][0]['name'] === 'PVD_AIRVPN_SWEDEN_V4', 'gateway v4 name'
 check($plan['gateways'][1]['ipprotocol'] === 'inet6', 'gateway v6');
 check($plan['interface']['if'] === 'ovpnc' . $plan['vpnid'], 'interface assignment');
 
+echo "== AirVPN quick-add reuses installed AirVPN_CA (no CA block in config) ==\n";
+$airvpn_ca = array('refid' => 'aaaairvpnca01', 'descr' => 'AirVPN_CA', 'crt' => base64_encode('FAKECERT'));
+$GLOBALS['CFG'] = array('ca' => array($airvpn_ca), 'openvpn' => array('openvpn-client' => array()));
+$qa = vpp_parse_ovpn("client\nremote 62.102.148.141 443 udp4\nauth-user-pass\n");
+$qa['tls'] = "-----BEGIN OpenVPN Static key V1-----\nfake\n-----END OpenVPN Static key V1-----\n";
+$qa['tls_type'] = 'crypt';
+$qplan = vpp_plan_create('AirVPN Pick', $qa, array('provider' => 'airvpn'));
+check(!isset($qplan['error']), 'quick-add plan ok without CA block');
+check($qplan['caref'] === 'aaaairvpnca01', 'quick-add reuses AirVPN_CA');
+check($qplan['ca_item'] === null, 'no CA import planned');
+check($qplan['client']['server_addr'] === '62.102.148.141', 'quick-add remote = entry IP');
+
 echo "== AirVPN status API parse ==\n";
 $api_json = json_encode(array('servers' => array(
 	array('name' => 'Wolfsburg', 'country_code' => 'de', 'country_name' => 'Germany', 'public_name' => 'de2.vpn.airdns.org', 'health' => 'ok', 'currentload' => 33, 'ip_v4_in1' => '1.2.3.4'),

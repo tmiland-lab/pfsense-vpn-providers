@@ -382,9 +382,6 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 			return array('error' => 'a client named "' . $name . '" already exists');
 		}
 	}
-	if (empty($parsed['ca_pem'])) {
-		return array('error' => 'no CA block found in the .ovpn import');
-	}
 	if (empty($parsed['remotes'])) {
 		return array('error' => 'no remote lines found in the .ovpn import');
 	}
@@ -394,11 +391,18 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 	$safe = strtoupper(preg_replace('/[^A-Za-z0-9]/', '_', $name));
 
 	/* CA: reuse an existing CA with our descr OR identical certificate
-	   content, else import a new one */
+	   content, else import a new one. AirVPN quick-add ships no CA block -
+	   it always reuses the installed AirVPN_CA. */
 	$ca_descr = 'PVD ' . $name . ' CA';
 	$caref = vpp_find_ca_by_descr($ca_descr);
 	if ($caref === '') {
-		$caref = vpp_find_ca_by_crt($parsed['ca_pem']);
+		$caref = vpp_find_ca_by_crt($parsed['ca_pem'] ?? '');
+	}
+	if ($caref === '' && ($opts['provider'] ?? '') === 'airvpn') {
+		$caref = vpp_find_ca_by_descr('AirVPN_CA');
+	}
+	if ($caref === '' && empty($parsed['ca_pem'])) {
+		return array('error' => 'no CA block found in the .ovpn import and no installed AirVPN_CA to reuse');
 	}
 	$ca_item = null;
 	if ($caref === '') {
