@@ -372,8 +372,8 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 		'digest' => $parsed['auth'],
 		'tunnel_network' => '',
 		'tunnel_networkv6' => '',
-		'remote_network' => array(),
-		'remote_networkv6' => array(),
+		'remote_network' => '',
+		'remote_networkv6' => '',
 		'allow_compression' => 'no',
 		'auth-retry-none' => true,
 		'passtos' => false,
@@ -391,8 +391,10 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 	if ($certref !== '') {
 		$client['certref'] = $certref;
 	}
+	/* pfSense stores cipher lists as comma-joined STRINGS - a PHP list here
+	   serializes as <0>...</0> which is invalid XML */
 	if (!empty($parsed['data_ciphers'])) {
-		$client['data_ciphers'] = $parsed['data_ciphers'];
+		$client['data_ciphers'] = implode(',', $parsed['data_ciphers']);
 	}
 	if (!empty($parsed['cipher']) && empty($parsed['data_ciphers'])) {
 		$client['data_ciphers_fallback'] = $parsed['cipher'];

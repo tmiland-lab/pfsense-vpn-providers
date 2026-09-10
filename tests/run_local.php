@@ -122,6 +122,7 @@ check($plan['client']['server_addr'] === 'se3.vpn.airdns.org' && $plan['client']
 check($plan['client']['tls_type'] === 'crypt' && $plan['client']['tlsauth_keydir'] === 'default', 'tls mapping');
 check(substr($plan['client']['tls'], 0, 5) !== '-----', 'tls base64-encoded');
 check($plan['client']['keepalive_interval'] === '5', 'keepalive interval');
+check($plan['client']['data_ciphers'] === 'AES-256-GCM,AES-128-GCM', 'data_ciphers joined string (pfSense storage format)');
 check(strpos($plan['client']['custom_options'], 'remote-cert-tls server;') !== false, 'remote-cert-tls in custom_options');
 check(strpos($plan['client']['custom_options'], 'mlock;') !== false, 'mlock in custom_options');
 check(strpos($plan['client']['custom_options'], 'route-nopull;') === false, 'route-nopull absent');
