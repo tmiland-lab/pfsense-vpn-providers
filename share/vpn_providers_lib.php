@@ -440,6 +440,26 @@ function vpp_find_ca_by_descr($descr) {
 	return '';
 }
 
+/* Connectable remote host for a country. AirVPN's legacy per-country
+   server hostnames (<cc>N.vpn.airdns.org) accept handshakes; the API entry
+   IPs (ip_v4_in1) are reachable but silently drop them - so quick-add must
+   connect via the hostname, exactly like the working .ovpn exports do.
+   Tries N=3 first (what the working exports use), then 1, 2, 4, 5. */
+function vpp_airvpn_cc_host($cc, $resolver = 'gethostbyname') {
+	$cc = strtolower(trim($cc));
+	if (!preg_match('/^[a-z]{2}$/', $cc)) {
+		return '';
+	}
+	foreach (array(3, 1, 2, 4, 5) as $n) {
+		$host = $cc . $n . '.vpn.airdns.org';
+		$ip = @$resolver($host);
+		if (is_string($ip) && $ip !== '' && $ip !== $host) {
+			return $host;
+		}
+	}
+	return '';
+}
+
 /* Find the client certificate an existing AirVPN tunnel uses (same CA), so
    quick-add can authenticate by certificate instead of user/pass. */
 function vpp_find_airvpn_certref($caref) {

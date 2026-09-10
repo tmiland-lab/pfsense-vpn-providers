@@ -134,29 +134,34 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 					$input_errors[] = gettext('Pick a server from the list.');
 				} else {
 					$srv = $valid[$host];
-					/* connect by entry IP (what the AirVPN monitor uses) - public_name
-					   is a display name, not always a resolvable connect hostname */
-					$remote = $srv['ip'] !== '' ? $srv['ip'] : $srv['host'];
-					$parsed = vpp_parse_ovpn("client\nremote {$remote} 443 udp4\n");
-					$parsed['tls'] = trim($tls) . "\n";
-					$parsed['tls_type'] = 'crypt';
-					$plan = vpp_plan_create($name, $parsed, array('provider' => 'airvpn', 'ipv' => $ipv, 'create_enabled' => $enabled) + $gw_opts);
-					if (isset($plan['error'])) {
-						$input_errors[] = $plan['error'];
+					/* connect via the country's server hostname - the API entry IPs
+					   (ip_v4_in1) drop handshakes, the <cc>N.vpn.airdns.org hostnames
+					   are what the working .ovpn exports use */
+					$remote = vpp_airvpn_cc_host($srv['cc']);
+					if ($remote === '') {
+						$input_errors[] = sprintf(gettext('No AirVPN server hostname found for %s - pick a server from another country.'), $srv['country']);
 					} else {
-						$existing = vpp_find_ca_by_descr('AirVPN_CA');
-						if ($existing !== '') {
-							$plan['caref'] = $existing;
-							$plan['client']['caref'] = $existing;
-							$plan['ca_item'] = null;
-						}
-						$r = vpp_apply_create($plan);
-						if (isset($r['error'])) {
-							$input_errors[] = $r['error'];
-						} elseif (isset($r['dryrun'])) {
-							$done = array('dryrun', sprintf(gettext('Dry run - nothing written. Enable "apply changes live" in settings to create: %s (%s)'), $plan['description'], $remote));
+						$parsed = vpp_parse_ovpn("client\nremote {$remote} 443 udp4\n");
+						$parsed['tls'] = trim($tls) . "\n";
+						$parsed['tls_type'] = 'crypt';
+						$plan = vpp_plan_create($name, $parsed, array('provider' => 'airvpn', 'ipv' => $ipv, 'create_enabled' => $enabled) + $gw_opts);
+						if (isset($plan['error'])) {
+							$input_errors[] = $plan['error'];
 						} else {
-							$done = array('ok', sprintf(gettext('Created %s (%s, disabled).'), $plan['description'], $remote));
+							$existing = vpp_find_ca_by_descr('AirVPN_CA');
+							if ($existing !== '') {
+								$plan['caref'] = $existing;
+								$plan['client']['caref'] = $existing;
+								$plan['ca_item'] = null;
+							}
+							$r = vpp_apply_create($plan);
+							if (isset($r['error'])) {
+								$input_errors[] = $r['error'];
+							} elseif (isset($r['dryrun'])) {
+								$done = array('dryrun', sprintf(gettext('Dry run - nothing written. Enable "apply changes live" in settings to create: %s (%s)'), $plan['description'], $remote));
+							} else {
+								$done = array('ok', sprintf(gettext('Created %s (%s, disabled).'), $plan['description'], $remote));
+							}
 						}
 					}
 				}
@@ -259,7 +264,7 @@ display_top_tabs($tab_array);
 						if (!empty($e['nat'])) {
 							$bits[] = gettext('NAT');
 						}
-						echo empty($bits) ? '<span class="text-muted">-</span>' : htmlspecialchars(implode('<br />', $bits));
+						echo empty($bits) ? '<span class="text-muted">-</span>' : implode('<br />', array_map('htmlspecialchars', $bits));
 					?></td>
 					<td><?= !$e['exists'] ? '<span class="text-warning">' . gettext('missing') . '</span>' : ($e['disabled'] ? gettext('disabled') : '<strong class="text-success">' . gettext('enabled') . '</strong>') ?></td>
 					<td>
@@ -352,7 +357,7 @@ display_top_tabs($tab_array);
 						<input class="form-control" type="text" name="natout_src" id="airvpn-natout-src" value="<?= htmlspecialchars(vpp_lan_cidr()) ?>" style="display:none;width:200px;margin-top:6px" placeholder="LAN subnet, e.g. 192.168.1.0/24" />
 					</td></tr>
 			</table>
-			<p class="text-muted"><?= gettext('Reuses the installed AirVPN_CA, the shared tls-crypt key and the client certificate of your existing AirVPN tunnels - no credentials needed. Note: AirVPN rotates the tls-crypt key for new server generations - if a freshly created tunnel stays silent, regenerate your AirVPN .ovpn export and paste the current &lt;tls-crypt&gt; key above.') ?></p>
+			<p class="text-muted"><?= gettext('Reuses the installed AirVPN_CA, the shared tls-crypt key and the client certificate of your existing AirVPN tunnels - no credentials needed. The tunnel connects via the country server hostname (e.g. de3.vpn.airdns.org); the API entry IPs are not connectable.') ?></p>
 <?php if (isset($airvpn_servers['list'])): ?>
 			<script>
 function vppFilterContinent() {

@@ -155,8 +155,17 @@ check($qplan['caref'] === 'aaaairvpnca01', 'quick-add reuses AirVPN_CA');
 check($qplan['ca_item'] === null, 'no CA import planned');
 check($qplan['client']['certref'] === 'aaaairvpncert0' && $qplan['cert_item'] === null, 'quick-add reuses the AirVPN client cert (no user/pass)');
 check(!isset($qplan['client']['auth_user_pass']) || $qplan['client']['auth_user_pass'] === false, 'no auth_user_pass when reusing certs');
-check($qplan['client']['server_addr'] === '62.102.148.141', 'quick-add remote = entry IP');
+check($qplan['client']['server_addr'] === '62.102.148.141', 'quick-add remote from parsed config');
 check($qplan['client']['data_ciphers'] === 'AES-256-GCM,AES-256-CBC' && $qplan['client']['data_ciphers_fallback'] === 'AES-256-CBC', 'no-cipher config gets valid data-ciphers defaults (OpenVPN 2.6 empty-line fix)');
+
+echo "== AirVPN country hostname remote ==\n";
+$fake = function ($h) { return $h === 'de3.vpn.airdns.org' ? '1.2.3.4' : $h; };
+check(vpp_airvpn_cc_host('DE', $fake) === 'de3.vpn.airdns.org', 'cc host prefers <cc>3 when it resolves');
+$fake1 = function ($h) { return $h === 'xy1.vpn.airdns.org' ? '1.2.3.5' : $h; };
+check(vpp_airvpn_cc_host('XY', $fake1) === 'xy1.vpn.airdns.org', 'falls back to <cc>1');
+$fakeNone = function ($h) { return $h; };
+check(vpp_airvpn_cc_host('ZZ', $fakeNone) === '', 'unresolvable country -> empty');
+check(vpp_airvpn_cc_host('', $fake) === '' && vpp_airvpn_cc_host('X', $fake) === '', 'bad cc -> empty');
 
 echo "== IP protocol selection (v4 / v6 / both) ==\n";
 check($plan['client']['create_gw'] === 'both' && count($plan['gateways']) === 2, 'default creates v4+v6 gateways');
