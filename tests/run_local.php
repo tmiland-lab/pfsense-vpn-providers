@@ -8,6 +8,7 @@ error_reporting(E_ALL);
 /* State dir must not touch the real /var/db in local tests */
 putenv('VPP_STATE=' . sys_get_temp_dir() . '/vpp-test-state');
 @mkdir(getenv('VPP_STATE'), 0755, true);
+@unlink(getenv('VPP_STATE') . '/registry.json');
 
 /* ---- pfSense stubs ---- */
 $GLOBALS['CFG'] = array();
@@ -142,6 +143,21 @@ check($qplan['caref'] === 'aaaairvpnca01', 'quick-add reuses AirVPN_CA');
 check($qplan['ca_item'] === null, 'no CA import planned');
 check($qplan['client']['server_addr'] === '62.102.148.141', 'quick-add remote = entry IP');
 
+echo "== IP protocol selection (v4 / v6 / both) ==\n";
+check($plan['client']['create_gw'] === 'both' && count($plan['gateways']) === 2, 'default creates v4+v6 gateways');
+$p4 = vpp_plan_create('Ipv4 Only', $qa, array('provider' => 'airvpn', 'ipv' => '4'));
+check(!isset($p4['error']) && count($p4['gateways']) === 1, 'ipv4-only: one gateway');
+check($p4['gateways'][0]['name'] === 'PVD_IPV4_ONLY_V4' && $p4['gateways'][0]['ipprotocol'] === 'inet', 'ipv4-only gateway is _V4/inet');
+check($p4['client']['create_gw'] === 'v4only', 'ipv4-only create_gw=v4only');
+$p6 = vpp_plan_create('Ipv6 Only', $qa, array('provider' => 'airvpn', 'ipv' => '6'));
+check(!isset($p6['error']) && count($p6['gateways']) === 1, 'ipv6-only: one gateway');
+check($p6['gateways'][0]['name'] === 'PVD_IPV6_ONLY_V6' && $p6['gateways'][0]['ipprotocol'] === 'inet6', 'ipv6-only gateway is _V6/inet6');
+check($p6['client']['create_gw'] === 'v6only', 'ipv6-only create_gw=v6only');
+$pb = vpp_plan_create('Ipv4 N6', $qa, array('provider' => 'airvpn', 'ipv' => '46'));
+check(count($pb['gateways']) === 2 && $pb['client']['create_gw'] === 'both', 'both selected creates both');
+$pb = vpp_plan_create('Ipv4 Bad', $qa, array('provider' => 'airvpn', 'ipv' => 'x'));
+check(count($pb['gateways']) === 2, 'invalid ipv falls back to both');
+
 echo "== AirVPN status API parse ==\n";
 $api_json = json_encode(array('servers' => array(
 	array('name' => 'Wolfsburg', 'country_code' => 'de', 'country_name' => 'Germany', 'public_name' => 'de2.vpn.airdns.org', 'health' => 'ok', 'currentload' => 33, 'ip_v4_in1' => '1.2.3.4'),
@@ -214,8 +230,25 @@ check(isset($r['ok']), 'enable ok');
 $cl = config_get_path('openvpn/openvpn-client');
 check(!isset($cl[0]['disable']), 'disable flag removed on enable');
 $r = vpp_set_enabled($uid, false);
+	$cl = config_get_path('openvpn/openvpn-client');
+	check(isset($cl[0]['disable']) && $cl[0]['disable'] === true, 'disable flag back');
+
+echo "== pfSense disable flag round-trips as empty element (isset semantics) ==\n";
 $cl = config_get_path('openvpn/openvpn-client');
-check(isset($cl[0]['disable']) && $cl[0]['disable'] === true, 'disable flag back');
+$cl[0]['disable'] = '';
+config_set_path('openvpn/openvpn-client', $cl);
+$rows = vpp_list();
+$ruid = array_key_first($rows);
+check(isset($rows[$ruid]['disabled']) && $rows[$ruid]['disabled'] === true, 'vpp_list reports disabled for empty-string disable flag');
+$cl = config_get_path('openvpn/openvpn-client');
+unset($cl[0]['disable']);
+config_set_path('openvpn/openvpn-client', $cl);
+$rows = vpp_list();
+check($rows[array_key_first($rows)]['disabled'] === false, 'vpp_list reports enabled when disable key absent');
+
+echo "== create_enabled=true leaves no disable key ==\n";
+$planE = vpp_plan_create('AirVPN Sweden', $p, array('create_enabled' => true));
+check(!isset($planE['client']['disable']), 'no disable key when create_enabled=true');
 
 echo "== remove ==\n";
 $r = vpp_remove($uid);
@@ -230,6 +263,93 @@ echo "== bogus ovpn rejected ==\n";
 $bad = vpp_parse_ovpn("client\nremote vpn.example.com 1194\n");
 $bp = vpp_plan_create('NoCA Test', $bad);
 check(isset($bp['error']) && strpos($bp['error'], 'CA') !== false, 'missing CA rejected');
+
+echo "== gateway groups ==\n";
+$GLOBALS['CFG'] = array();
+check(is_array(vpp_gateway_groups()) && count(vpp_gateway_groups()) === 0, 'no groups initially');
+$r = vpp_gateway_group_add('VPN_Group', array('PVD_A_V4', 'PVD_A_V6'), 3);
+check(isset($r['error']) === false, 'group created');
+$g = vpp_gateway_groups();
+check(isset($g['VPN_Group']), 'group listed');
+$gg = config_get_path('gateways/gateway_group');
+check(count($gg) === 1 && count($gg[0]['item']) === 2, 'group has 2 items');
+check($gg[0]['item'][0] === 'PVD_A_V4|3|address', 'item format GW|weight|address');
+$r = vpp_gateway_group_add('VPN_Group', array('PVD_A_V4'), 9);
+$gg = config_get_path('gateways/gateway_group');
+check(count($gg) === 1 && count($gg[0]['item']) === 2, 're-add dedups');
+check(in_array('PVD_A_V4|9|address', $gg[0]['item'], true), 'weight updated on re-add');
+check(isset(vpp_gateway_group_add('../evil', array('X'))['error']), 'bad group name rejected');
+check(count(vpp_gateway_groups_for(array('PVD_A_V6'))) === 1, 'groups_for finds membership');
+check(vpp_gateway_groups_strip(array('PVD_A_V6')) === true, 'strip removed gateway');
+check(count(vpp_gateway_groups_for(array('PVD_A_V6'))) === 0, 'membership gone after strip');
+$gg = config_get_path('gateways/gateway_group');
+check(count($gg[0]['item']) === 1 && $gg[0]['item'][0] === 'PVD_A_V4|9|address', 'strip keeps the other gateway');
+
+echo "== outbound NAT ==\n";
+$r = vpp_nat_outbound_add('opt1', '192.168.1.0/24', 'PVD Test');
+check(isset($r['error']) === false, 'NAT rule added');
+$nr = config_get_path('nat/outbound/rule');
+check(count($nr) === 1 && $nr[0]['interface'] === 'opt1' && $nr[0]['target'] === 'opt1ip', 'rule binds opt1 -> opt1ip');
+check(($nr[0]['source']['network'] ?? '') === '192.168.1.0/24' && $nr[0]['ipprotocol'] === 'inet' && ($nr[0]['destination']['any'] ?? '') === '', 'rule shape matches existing AirVPN rules');
+$r = vpp_nat_outbound_add('opt1', '192.168.1.0/24', 'PVD Test');
+check(count((array)config_get_path('nat/outbound/rule', array())) === 1, 'duplicate rule skipped');
+check(isset(vpp_nat_outbound_add('opt1', 'bogus', 'PVD X')['error']), 'bad NAT subnet rejected');
+check(vpp_nat_outbound_remove('opt1', 'PVD ') === true, 'our NAT rules removed');
+check(count((array)config_get_path('nat/outbound/rule', array())) === 0, 'NAT list empty');
+
+echo "== plan opts: group + nat + ipv4-only ==\n";
+$GLOBALS['CFG'] = array('interfaces' => array('lan' => array('ipaddr' => '192.168.1.1', 'subnet' => '24'), 'opt1' => array('if' => 'ovpnc2')));
+$planG = vpp_plan_create('Grouper', $p, array('provider' => 'import', 'gateway_group' => 'VPN_Group', 'gateway_group_weight' => 7, 'nat_outbound' => 1, 'nat_src' => '192.168.1.0/24'));
+check(!isset($planG['error']), 'plan with group+nat built: ' . ($planG['error'] ?? 'ok'));
+check($planG['nat_outbound']['descr'] === 'PVD Grouper', 'nat descr tagged PVD');
+$GLOBALS['WRITTEN'] = array();
+$GLOBALS['CFG']['installedpackages']['vpn_providers']['settings']['apply_live'] = 'yes';
+$r = vpp_apply_create($planG);
+check(isset($r['ok']), 'group+nat apply ok');
+check((config_get_path('gateways/gateway_group')[0]['item'][0] ?? '') === 'PVD_GROUPER_V4|7|address', 'gateway added to group with weight');
+check((config_get_path('nat/outbound/rule')[0]['interface'] ?? '') === $planG['opt'], 'NAT rule created for client interface');
+$regG = vpp_registry();
+$planIP = vpp_plan_create('V4Only', $p, array('provider' => 'import', 'ipv' => '4'));
+check(count($planIP['gateways']) === 1 && $planIP['gateways'][0]['ipprotocol'] === 'inet', 'ipv4-only plan keeps one gateway');
+check($planIP['gw_names'] === array('PVD_V4ONLY_V4'), 'gw_names reflects single gateway (registry bug fix)');
+
+echo "== adopt existing ==\n";
+$GLOBALS['CFG'] = array(
+	'interfaces' => array('opt3' => array('if' => 'ovpnc3')),
+	'openvpn' => array('openvpn-client' => array(
+		array('description' => 'AirVPN_GB', 'vpnid' => 3, 'server_addr' => 'gb3.vpn.airdns.org', 'server_port' => '443'),
+		array('description' => 'Wireguard Home', 'vpnid' => 9),
+	)),
+	'gateways' => array('gateway_item' => array(array('name' => 'AIRVPN_GB_VPNV4', 'interface' => 'opt3'))),
+);
+$added = vpp_adopt_existing();
+check($added === 1, 'adopted exactly the AirVPN_* client');
+$reg = vpp_registry();
+$ad = null;
+foreach ($reg as $e) {
+	if (($e['description'] ?? '') === 'AirVPN_GB') { $ad = $e; break; }
+}
+check($ad !== null, 'adopted entry registered');
+check(($ad['name'] ?? '') === 'AirVPN_GB' && ($ad['opt'] ?? '') === 'opt3', 'adopted entry wired to opt3');
+check(in_array('AIRVPN_GB_VPNV4', (array)($ad['gateways'] ?? array()), true), 'adopted gateways mapped via interface');
+check(vpp_adopt_existing() === 0, 'adopt is idempotent');
+
+echo "== backup / restore ==\n";
+$backup = vpp_backup();
+$data = json_decode($backup, true);
+check(($data['format'] ?? '') === 'pfsense-vpn-providers', 'backup tagged with format');
+check(isset($data['clients'][0]['client']['description']), 'backup contains client entry');
+$GLOBALS['CFG']['openvpn']['openvpn-client'] = array();
+unset($GLOBALS['CFG']['interfaces']['opt3']);
+$idog = array_pop($GLOBALS['CFG']['gateways']['gateway_item']);
+$r = vpp_restore($backup);
+check(isset($r['error']) === false && $r['added'] === 1, 'restore re-inserted the client');
+check(count((array)config_get_path('openvpn/openvpn-client', array())) === 1, 'restored client back in config');
+check((config_get_path('interfaces/opt3/if') ?? '') === 'ovpnc3', 'restored interface assignment');
+check((config_get_path('gateways/gateway_item')[0]['name'] ?? '') === 'AIRVPN_GB_VPNV4', 'restored gateway');
+$r = vpp_restore($backup);
+check($r['added'] === 0, 'restore skips existing clients');
+check(isset(vpp_restore('{"nope":1}')['error']), 'garbage restore rejected');
 
 echo "\nRESULT: $pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

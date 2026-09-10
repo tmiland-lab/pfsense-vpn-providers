@@ -54,8 +54,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 	} elseif ($action === 'add_airvpn') {
 		$name = trim(vpp_post('name'));
 		$tls = vpp_post('tlskey');
+		$ipv = (vpp_post('ipv4') === '1' ? '4' : '') . (vpp_post('ipv6') === '1' ? '6' : '');
+		$enabled = vpp_post('enabled') === '1';
+		/* routing extras: gateway group membership + priority, outbound NAT */
+		$opt_group = vpp_post('gwgroup_existing');
+		if ($opt_group === '__new__') {
+			$opt_group = trim(vpp_post('gwgroup_new'));
+		}
+		$gw_opts = array('gateway_group' => $opt_group, 'gateway_group_weight' => vpp_post('gwgroup_prio'));
+		$nat_src = vpp_post('natout_src');
+		if (vpp_post('natout') === '1') {
+			if (trim($nat_src) === '') {
+				$nat_src = vpp_lan_cidr();
+			}
+			$gw_opts['nat_outbound'] = 1;
+			$gw_opts['nat_src'] = trim($nat_src);
+		}
 		if ($name === '') {
 			$input_errors[] = gettext('Name is required.');
+		}
+		if (!in_array($ipv, array('4', '6', '46'), true)) {
+			$input_errors[] = gettext('Pick at least one IP protocol - IPv4, IPv6 or both.');
 		}
 		if (trim($tls) === '') {
 			/* reuse the shared AirVPN tls-crypt key from an existing tunnel */
@@ -75,7 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 					$parsed = vpp_parse_ovpn("client\nremote {$host} 443 udp4\nauth-user-pass\n");
 					$parsed['tls'] = trim($tls) . "\n";
 					$parsed['tls_type'] = 'crypt';
-					$plan = vpp_plan_create($name, $parsed, array('provider' => 'airvpn'));
+					$plan = vpp_plan_create($name, $parsed, array('provider' => 'airvpn', 'ipv' => $ipv, 'create_enabled' => $enabled) + $gw_opts);
 					if (isset($plan['error'])) {
 						$input_errors[] = $plan['error'];
 					} else {
@@ -111,7 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 					$parsed = vpp_parse_ovpn("client\nremote {$remote} 443 udp4\nauth-user-pass\n");
 					$parsed['tls'] = trim($tls) . "\n";
 					$parsed['tls_type'] = 'crypt';
-					$plan = vpp_plan_create($name, $parsed, array('provider' => 'airvpn'));
+					$plan = vpp_plan_create($name, $parsed, array('provider' => 'airvpn', 'ipv' => $ipv, 'create_enabled' => $enabled) + $gw_opts);
 					if (isset($plan['error'])) {
 						$input_errors[] = $plan['error'];
 					} else {
@@ -147,6 +166,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 		} else {
 			$done = array('ok', gettext('Client removed (client, interface, gateways, owned CA/cert).'));
 		}
+	} elseif ($action === 'adopt') {
+		$added = vpp_adopt_existing();
+		$done = array('ok', sprintf(gettext('Adopted %d existing provider client(s).'), $added));
+	} elseif ($action === 'backup') {
+		$data = vpp_backup();
+		header('Content-Type: application/json');
+		header('Content-Disposition: attachment; filename="vpn-providers-backup.json"');
+		echo $data;
+		exit;
+	} elseif ($action === 'restore' && isset($_FILES['restorefile']['tmp_name']) && is_uploaded_file($_FILES['restorefile']['tmp_name'])) {
+		$r = vpp_restore(file_get_contents($_FILES['restorefile']['tmp_name']));
+		if (isset($r['error'])) {
+			$input_errors[] = $r['error'];
+		} else {
+			$done = array('ok', sprintf(gettext('Restored %d client(s).'), $r['added']));
+		}
 	}
 }
 
@@ -167,6 +202,23 @@ display_top_tabs($tab_array);
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?= gettext('Provider clients') ?></h2></div>
 	<div class="panel-body">
+		<form method="post" style="display:inline">
+			<input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['request_token']) ?>" />
+			<input type="hidden" name="action" value="adopt" />
+			<button type="submit" class="btn btn-xs btn-info"><?= gettext('Adopt existing provider clients') ?></button>
+		</form>
+		<form method="post" style="display:inline" enctype="multipart/form-data">
+			<input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['request_token']) ?>" />
+			<input type="hidden" name="action" value="backup" />
+			<button type="submit" class="btn btn-xs btn-default"><?= gettext('Backup clients') ?></button>
+		</form>
+		<form method="post" style="display:inline" enctype="multipart/form-data">
+			<input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['request_token']) ?>" />
+			<input type="hidden" name="action" value="restore" />
+			<input type="file" name="restorefile" class="btn btn-xs" accept="application/json" />
+			<button type="submit" class="btn btn-xs btn-default" <?= $apply_live ? '' : 'disabled' ?>><?= gettext('Restore clients') ?></button>
+		</form>
+		<p class="text-muted" style="margin-top:8px"><?= gettext('Backup exports the provider client entries (client, interface, gateways) as JSON. Restore re-inserts any that are missing. Adopt registers existing AirVPN / Provider clients so they can be managed here.') ?></p>
 		<table class="table table-striped table-hover">
 			<thead>
 				<tr>
@@ -174,6 +226,7 @@ display_top_tabs($tab_array);
 					<th><?= gettext('Server') ?></th>
 					<th><?= gettext('Interface') ?></th>
 					<th><?= gettext('Gateways') ?></th>
+					<th><?= gettext('Routing') ?></th>
 					<th><?= gettext('State') ?></th>
 					<th><?= gettext('Actions') ?></th>
 				</tr>
@@ -181,13 +234,23 @@ display_top_tabs($tab_array);
 			<tbody>
 <?php $rows = vpp_list(); ?>
 <?php if (empty($rows)): ?>
-				<tr><td colspan="6" class="text-muted"><?= gettext('No provider clients yet - add one below.') ?></td></tr>
+				<tr><td colspan="7" class="text-muted"><?= gettext('No provider clients yet - add one below.') ?></td></tr>
 <?php else: foreach ($rows as $e): ?>
 				<tr>
 					<td><?= htmlspecialchars($e['name']) ?></td>
 					<td><?= htmlspecialchars($e['server']) ?></td>
 					<td><?= htmlspecialchars(($e['opt'] ?? '') . ' / ovpnc' . $e['vpnid']) ?></td>
 					<td><?= htmlspecialchars(implode(', ', (array)($e['gateways'] ?? array()))) ?></td>
+					<td><?php
+						$bits = array();
+						if (!empty($e['groups'])) {
+							$bits[] = gettext('grp') . ': ' . implode(', ', array_keys($e['groups']));
+						}
+						if (!empty($e['nat'])) {
+							$bits[] = gettext('NAT');
+						}
+						echo empty($bits) ? '<span class="text-muted">-</span>' : htmlspecialchars(implode('<br />', $bits));
+					?></td>
 					<td><?= !$e['exists'] ? '<span class="text-warning">' . gettext('missing') . '</span>' : ($e['disabled'] ? gettext('disabled') : '<strong class="text-success">' . gettext('enabled') . '</strong>') ?></td>
 					<td>
 						<form method="post" style="display:inline">
@@ -253,6 +316,31 @@ display_top_tabs($tab_array);
 <?php endif; ?>
 				<tr><td><strong><?= gettext('tls-crypt key') ?></strong><br /><span class="text-muted"><?= $airvpn_tlskey === '' ? gettext('paste the &lt;tls-crypt&gt; block from any AirVPN .ovpn export') : gettext('shared across all AirVPN servers - already configured on this box, edit only if needed') ?></span></td>
 					<td><textarea class="form-control" name="tlskey" rows="5" placeholder="-----BEGIN OpenVPN Static key V1-----"><?= htmlspecialchars($airvpn_tlskey) ?></textarea></td></tr>
+				<tr><td><strong><?= gettext('IP protocols') ?></strong><br /><span class="text-muted"><?= gettext('which tunnel gateways to create') ?></span></td>
+					<td>
+						<label class="checkbox-inline"><input type="checkbox" name="ipv4" value="1" checked /> <?= gettext('IPv4') ?></label>
+						<label class="checkbox-inline"><input type="checkbox" name="ipv6" value="1" checked /> <?= gettext('IPv6') ?></label>
+					</td></tr>
+				<tr><td><strong><?= gettext('Start enabled') ?></strong><br /><span class="text-muted"><?= gettext('create the tunnel enabled (default: disabled)') ?></span></td>
+					<td><label class="checkbox-inline"><input type="checkbox" name="enabled" value="1" /> <?= gettext('Enable immediately') ?></label></td></tr>
+				<tr><td><strong><?= gettext('Gateway group') ?></strong><br /><span class="text-muted"><?= gettext('add the new gateways to a load-balancing / failover group') ?></span></td>
+					<td>
+						<select class="form-control" name="gwgroup_existing" id="airvpn-gwgroup-exist">
+							<option value=""><?= gettext('- none -') ?></option>
+<?php foreach (vpp_gateway_groups() as $gname => $gdescr): ?>
+							<option value="<?= htmlspecialchars($gname) ?>"><?= htmlspecialchars($gdescr !== $gname ? $gname . ' (' . $gdescr . ')' : $gname) ?></option>
+<?php endforeach; ?>
+							<option value="__new__"><?= gettext('- new group -') ?></option>
+						</select>
+						<input class="form-control" type="text" name="gwgroup_new" id="airvpn-gwgroup-new" value="VPN_Group" style="display:none" maxlength="63" placeholder="<?= gettext('group name') ?>" />
+					</td></tr>
+				<tr><td><strong><?= gettext('Priority (weight)') ?></strong><br /><span class="text-muted"><?= gettext('gateway weight for the group, 1-500') ?></span></td>
+					<td><input class="form-control" type="number" name="gwgroup_prio" id="airvpn-gwgroup-prio" min="1" max="500" value="1" style="width:120px" /></td></tr>
+				<tr><td><strong><?= gettext('Outbound NAT') ?></strong><br /><span class="text-muted"><?= gettext('route LAN traffic out of this tunnel (advanced NAT, same style as your existing AirVPN rules)') ?></span></td>
+					<td>
+						<label class="checkbox-inline"><input type="checkbox" name="natout" id="airvpn-natout" value="1" /> <?= gettext('Add outbound NAT rule') ?></label>
+						<input class="form-control" type="text" name="natout_src" id="airvpn-natout-src" value="<?= htmlspecialchars(vpp_lan_cidr()) ?>" style="display:none;width:200px;margin-top:6px" placeholder="LAN subnet, e.g. 192.168.1.0/24" />
+					</td></tr>
 			</table>
 			<p class="text-muted"><?= gettext('Reuses the installed AirVPN_CA. The remote list is managed by the AirVPN Remotes monitor package once the client is enabled.') ?></p>
 <?php if (isset($airvpn_servers['list'])): ?>
@@ -283,6 +371,28 @@ function vppDeriveName() {
 		nm.value = 'AirVPN_' + cc;
 	}
 }
+function vppGwgroupToggle() {
+	var exist = document.getElementById('airvpn-gwgroup-exist');
+	var fresh = document.getElementById('airvpn-gwgroup-new');
+	var prio = document.getElementById('airvpn-gwgroup-prio');
+	if (!exist || !fresh) { return; }
+	fresh.style.display = (exist.value === '__new__') ? '' : 'none';
+	if (prio) {
+		prio.disabled = (exist.value === '' && fresh.value === '');
+	}
+}
+function vppNatToggle() {
+	var on = document.getElementById('airvpn-natout');
+	var src = document.getElementById('airvpn-natout-src');
+	if (on && src) {
+		src.style.display = on.checked && src.value !== '' ? '' : 'none';
+		src.disabled = !on.checked;
+	}
+}
+var _gwe = document.getElementById('airvpn-gwgroup-exist');
+if (_gwe) { _gwe.addEventListener('change', vppGwgroupToggle); vppGwgroupToggle(); }
+var _nate = document.getElementById('airvpn-natout');
+if (_nate) { _nate.addEventListener('change', vppNatToggle); }
 </script>
 <?php endif; ?>
 			<button type="submit" class="btn btn-primary"><?= gettext('Create (disabled)') ?></button>

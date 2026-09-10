@@ -567,13 +567,17 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 		'route_no_exec' => false,
 		'dns_add' => false,
 		'verbosity_level' => 1,
-		'create_gw' => 'both',
 		'ping_method' => 'keepalive',
 		'keepalive_interval' => (string)$parsed['keepalive'][0],
 		'keepalive_timeout' => (string)$parsed['keepalive'][1],
 		'inactive_seconds' => 300,
-		'disable' => true
 	);
+	/* pfSense treats the disable flag by KEY PRESENCE (isset), and serializes
+	   PHP true/false into an empty XML element - so an absent key means enabled,
+	   a present key (even value '') means disabled. Only set it when disabled. */
+	if (empty($opts['create_enabled'])) {
+		$client['disable'] = true;
+	}
 	if ($certref !== '') {
 		$client['certref'] = $certref;
 	}
@@ -591,9 +595,30 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 		$client['tlsauth_keydir'] = in_array($parsed['tls_direction'], array('0', '1')) ? $parsed['tls_direction'] : 'default';
 	}
 
+	/* which tunnel IP protocols to create: '4', '6' or both ('46') */
+	$ipv = (string)($opts['ipv'] ?? '46');
+	if (!in_array($ipv, array('4', '6', '46'), true)) {
+		$ipv = '46';
+	}
+	$client['create_gw'] = $ipv === '4' ? 'v4only' : ($ipv === '6' ? 'v6only' : 'both');
+
+	/* optional routing: gateway group membership (with priority/weight) and an
+	   outbound NAT rule mirroring the existing AirVPN rules */
+	$gateway_group = trim((string)($opts['gateway_group'] ?? ''));
+	if ($gateway_group !== '' && !preg_match('/^[A-Za-z0-9 _.-]{1,63}$/', $gateway_group)) {
+		return array('error' => 'invalid gateway group name');
+	}
+	$gateway_group_weight = max(1, min(500, (int)($opts['gateway_group_weight'] ?? 1)));
+	$nat_src = trim((string)($opts['nat_src'] ?? ''));
+	if ($nat_src !== '' && !preg_match('#^\d{1,3}(\.\d{1,3}){3}/(\d{1,2})$#', $nat_src)) {
+		return array('error' => 'invalid NAT source subnet');
+	}
+	$nat_outbound = !empty($opts['nat_outbound']);
+
 	$gwbase = 'PVD_' . $safe;
-	$gateways = array(
-		array(
+	$gateways = array();
+	if ($ipv !== '6') {
+		$gateways[] = array(
 			'name' => $gwbase . '_V4',
 			'interface' => $opt,
 			'ipprotocol' => 'inet',
@@ -601,8 +626,10 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 			'descr' => 'Interface ' . $gwbase . '_V4 Gateway',
 			'weight' => 1,
 			'attributedown' => ''
-		),
-		array(
+		);
+	}
+	if ($ipv !== '4') {
+		$gateways[] = array(
 			'name' => $gwbase . '_V6',
 			'interface' => $opt,
 			'ipprotocol' => 'inet6',
@@ -610,8 +637,8 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 			'descr' => 'Interface ' . $gwbase . '_V6 Gateway',
 			'weight' => 1,
 			'attributedown' => ''
-		)
-	);
+		);
+	}
 
 	$interface = array(
 		'if' => 'ovpnc' . $vpnid,
@@ -631,8 +658,162 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 		'client' => $client,
 		'interface' => $interface,
 		'gateways' => $gateways,
+		'gw_names' => array_column($gateways, 'name'),
+		'gateway_group' => $gateway_group,
+		'gateway_group_weight' => $gateway_group_weight,
+		'nat_outbound' => array('src' => $nat_src, 'descr' => 'PVD ' . $name),
 		'disabled' => true
 	);
+}
+
+/* ------------------------------------------------------------------
+ * Gateway groups + outbound NAT (routing for a created client)
+ * ------------------------------------------------------------------ */
+
+/* Existing gateway groups, keyed by name. pfSense stores them as
+   gateways/gateway_group, each {name, item[], trigger, descr} where each
+   item is "GATEWAYNAME|WEIGHT|address". */
+function vpp_gateway_groups() {
+	$out = array();
+	foreach ((array)config_get_path('gateways/gateway_group', array()) as $g) {
+		$name = trim((string)($g['name'] ?? ''));
+		if ($name !== '') {
+			$out[$name] = trim((string)($g['descr'] ?? '')) !== '' ? $g['descr'] : $name;
+		}
+	}
+	return $out;
+}
+
+/* Add gateways to a group (creating it when needed). A gateway already in
+   the group is re-weighted, not duplicated. */
+function vpp_gateway_group_add($name, $gateways, $weight = 1) {
+	$name = trim($name);
+	if ($name === '' || strlen($name) > 63 || !preg_match('/^[A-Za-z0-9 _.-]+$/', $name)) {
+		return array('error' => 'invalid gateway group name');
+	}
+	$weight = max(1, min(500, (int)$weight));
+	$groups = (array)config_get_path('gateways/gateway_group', array());
+	$idx = null;
+	foreach ($groups as $k => $g) {
+		if (($g['name'] ?? '') === $name) {
+			$idx = $k;
+			break;
+		}
+	}
+	if ($idx === null) {
+		$idx = count($groups);
+		$groups[$idx] = array('name' => $name, 'item' => array(), 'trigger' => 'down', 'descr' => $name);
+	}
+	$item = array();
+	foreach ((array)($groups[$idx]['item'] ?? array()) as $it) {
+		$item[$it] = $it;
+	}
+	foreach ((array)$gateways as $gw) {
+		foreach (array_keys($item) as $k_it) {
+			if (explode('|', (string)$item[$k_it])[0] === $gw) {
+				unset($item[$k_it]);
+			}
+		}
+		$item[$gw . '|' . $weight . '|address'] = $gw . '|' . $weight . '|address';
+	}
+	$groups[$idx]['item'] = array_values($item);
+	config_set_path('gateways/gateway_group', $groups);
+	return array('ok' => true, 'group' => $name);
+}
+
+/* Remove the given gateways from every group; groups themselves stay. */
+function vpp_gateway_groups_strip($gateways) {
+	$gateways = (array)$gateways;
+	$groups = (array)config_get_path('gateways/gateway_group', array());
+	$changed = false;
+	foreach ($groups as $k => $g) {
+		$keep = array();
+		foreach ((array)($g['item'] ?? array()) as $it) {
+			if (in_array(explode('|', (string)$it)[0], $gateways, true)) {
+				$changed = true;
+				continue;
+			}
+			$keep[] = $it;
+		}
+		$groups[$k]['item'] = $keep;
+	}
+	if ($changed) {
+		config_set_path('gateways/gateway_group', $groups);
+	}
+	return $changed;
+}
+
+/* Groups a set of gateways belongs to: name => matching group item. */
+function vpp_gateway_groups_for($gateways) {
+	$out = array();
+	$gateways = (array)$gateways;
+	if (empty($gateways)) {
+		return $out;
+	}
+	foreach ((array)config_get_path('gateways/gateway_group', array()) as $g) {
+		foreach ((array)($g['item'] ?? array()) as $it) {
+			if (in_array(explode('|', (string)$it)[0], $gateways, true)) {
+				$out[$g['name'] ?? '?'] = $it;
+			}
+		}
+	}
+	return $out;
+}
+
+/* LAN CIDR derived from the box config (what the existing AirVPN outbound
+   NAT rules use as their source). */
+function vpp_lan_cidr() {
+	$ip = (string)config_get_path('interfaces/lan/ipaddr', '');
+	$subnet = (string)config_get_path('interfaces/lan/subnet', '');
+	if ($ip !== '' && (int)$subnet > 0) {
+		return $ip . '/' . (int)$subnet;
+	}
+	return '192.168.1.0/24';
+}
+
+/* Outbound NAT rule in the exact shape of the existing AirVPN rules:
+   source = LAN CIDR, target = <optN>ip, ipprotocol = inet, descr tag. */
+function vpp_nat_outbound_add($interface, $src_cidr, $descr) {
+	if (!preg_match('#^\d{1,3}(\.\d{1,3}){3}/(\d{1,2})$#', $src_cidr)) {
+		return array('error' => 'invalid NAT source subnet');
+	}
+	$rules = array_values(array_filter(
+		(array)config_get_path('nat/outbound/rule', array()),
+		function ($r) use ($interface, $descr) {
+			return !((($r['interface'] ?? '') === $interface) && (($r['descr'] ?? '') === $descr));
+		}
+	));
+	$rules[] = array(
+		'source' => array('network' => $src_cidr),
+		'sourceport' => '',
+		'descr' => $descr,
+		'target' => $interface . 'ip',
+		'interface' => $interface,
+		'poolopts' => '',
+		'source_hash_key' => '',
+		'ipprotocol' => 'inet',
+		'destination' => array('any' => ''),
+		'target_subnet' => '',
+	);
+	config_set_path('nat/outbound/rule', $rules);
+	return array('ok' => true);
+}
+
+/* Remove our outbound NAT rules (matching interface + descr prefix). */
+function vpp_nat_outbound_remove($interface, $descr_prefix) {
+	$rules = (array)config_get_path('nat/outbound/rule', array());
+	$before = count($rules);
+	$rules = array_values(array_filter($rules, function ($r) use ($interface, $descr_prefix) {
+		if (($r['interface'] ?? '') !== $interface) {
+			return true;
+		}
+		return strpos((string)($r['descr'] ?? ''), $descr_prefix) !== 0;
+	}));
+	if (count($rules) !== $before) {
+		config_set_path('nat/outbound/rule', $rules);
+		return true;
+	}
+	return false;
 }
 
 /* ------------------------------------------------------------------
@@ -672,6 +853,14 @@ function vpp_apply_create($plan) {
 	}
 	config_set_path('gateways/gateway_item', $a_gw);
 
+	/* routing extras the user opted into */
+	if ($plan['gateway_group'] !== '') {
+		vpp_gateway_group_add($plan['gateway_group'], $plan['gw_names'], $plan['gateway_group_weight']);
+	}
+	if (!empty($plan['nat_outbound']['src'])) {
+		vpp_nat_outbound_add($plan['opt'], $plan['nat_outbound']['src'], $plan['nat_outbound']['descr']);
+	}
+
 	write_config('VPN Providers: added ' . $plan['description'] . ' (disabled)');
 
 	/* regenerate the (disabled) client config; no tunnel starts */
@@ -690,7 +879,7 @@ function vpp_apply_create($plan) {
 		'opt' => $plan['opt'],
 		'caref' => $plan['caref'],
 		'certref' => $plan['certref'],
-		'gateways' => array($plan['gateways'][0]['name'], $plan['gateways'][1]['name']),
+		'gateways' => $plan['gw_names'],
 		'created' => date('c'),
 		'provider' => $plan['provider'] ?? 'import'
 	);
@@ -795,6 +984,11 @@ function vpp_remove($uid) {
 	}));
 	config_set_path('gateways/gateway_item', $a_gw);
 
+	/* drop the client's gateways from any gateway groups, and remove our
+	   outbound NAT rules for this interface */
+	vpp_gateway_groups_strip($entry['gateways'] ?? array());
+	vpp_nat_outbound_remove($opt, 'PVD ');
+
 	unset($reg[$uid]);
 	vpp_registry_save($reg);
 	write_config('VPN Providers: removed ' . $descr);
@@ -819,9 +1013,161 @@ function vpp_list() {
 			}
 		}
 		$e['exists'] = ($client !== null);
-		$e['disabled'] = !empty($client['disable']);
+		$e['disabled'] = isset($client['disable']);
 		$e['server'] = ($client['server_addr'] ?? '') . ':' . ($client['server_port'] ?? '');
+		$e['groups'] = vpp_gateway_groups_for($e['gateways'] ?? array());
+		$e['nat'] = false;
+		if ($client !== null && !empty($e['opt'])) {
+			foreach ((array)config_get_path('nat/outbound/rule', array()) as $r) {
+				if (($r['interface'] ?? '') === $e['opt'] && strpos((string)($r['descr'] ?? ''), 'PVD ') === 0) {
+					$e['nat'] = true;
+					break;
+				}
+			}
+		}
 		$out[$uid] = $e;
 	}
 	return $out;
+}
+
+/* Adopt existing OpenVPN clients that belong to this package into the
+   registry so they appear in the list, can be managed/removed and are
+   included in backups. Idempotent (keyed on the client description). */
+function vpp_adopt_existing() {
+	$reg = vpp_registry();
+	$have = array();
+	foreach ($reg as $e) {
+		$have[$e['description']] = true;
+	}
+	$interface_map = array();
+	foreach ((array)config_get_path('interfaces', array()) as $k => $v) {
+		if (is_array($v) && !empty($v['if'])) {
+			$interface_map[$v['if']] = $k;
+		}
+	}
+	$by_opt = array();
+	foreach ((array)config_get_path('gateways/gateway_item', array()) as $g) {
+		$by_opt[$g['interface']][] = $g['name'];
+	}
+	$added = 0;
+	foreach ((array)config_get_path('openvpn/openvpn-client', array()) as $c) {
+		$descr = trim((string)($c['description'] ?? ''));
+		if ($descr === '' || !(strpos($descr, 'AirVPN') === 0 || strpos($descr, 'Provider: ') === 0)) {
+			continue;
+		}
+		if (isset($have[$descr])) {
+			continue;
+		}
+		$name = strpos($descr, 'Provider: ') === 0 ? substr($descr, 10) : $descr;
+		$vpnid = (int)($c['vpnid'] ?? 0);
+		$opt = $interface_map['ovpnc' . $vpnid] ?? '';
+		$uid = uniqid('pvd');
+		$reg[$uid] = array(
+			'uid' => $uid,
+			'name' => $name,
+			'description' => $descr,
+			'vpnid' => $vpnid,
+			'opt' => $opt,
+			'caref' => (string)($c['caref'] ?? ''),
+			'certref' => (string)($c['certref'] ?? ''),
+			'gateways' => isset($by_opt[$opt]) ? array_values($by_opt[$opt]) : array(),
+			'created' => date('c'),
+			'provider' => strpos($descr, 'AirVPN ') === 0 ? 'airvpn' : 'import'
+		);
+		$have[$descr] = true;
+		$added++;
+	}
+	if ($added > 0) {
+		vpp_registry_save($reg);
+	}
+	return $added;
+}
+
+/* ------------------------------------------------------------------
+ * Backup / restore (provider clients it manages)
+ * ------------------------------------------------------------------ */
+
+function vpp_backup() {
+	$out = array('format' => 'pfsense-vpn-providers', 'version' => '1', 'exported' => date('c'));
+	$reg = vpp_registry();
+	$a_client = (array)config_get_path('openvpn/openvpn-client', array());
+	$intf = (array)config_get_path('interfaces', array());
+	$a_gw = (array)config_get_path('gateways/gateway_item', array());
+	foreach ($reg as $e) {
+		$client = null;
+		foreach ($a_client as $c) {
+			if (($c['description'] ?? '') === ($e['description'] ?? '')) {
+				$client = $c;
+				break;
+			}
+		}
+		if ($client === null) {
+			continue;
+		}
+		$entry = array(
+			'registry' => $e,
+			'client' => $client,
+			'interface' => ($e['opt'] !== '' && isset($intf[$e['opt']])) ? $intf[$e['opt']] : null,
+			'gateways' => array()
+		);
+		foreach ($a_gw as $g) {
+			if (in_array(($g['name'] ?? ''), (array)($e['gateways'] ?? array()), true)) {
+				$entry['gateways'][] = $g;
+			}
+		}
+		$out['clients'][] = $entry;
+	}
+	return json_encode($out);
+}
+
+/* Restore a backup: re-insert any client entry that is not already present
+   (matched by description), with its interface assignment + gateways. */
+function vpp_restore($json) {
+	$data = json_decode($json, true);
+	if (!is_array($data) || ($data['format'] ?? '') !== 'pfsense-vpn-providers') {
+		return array('error' => 'not a vpn-providers backup file');
+	}
+	$a_client = (array)config_get_path('openvpn/openvpn-client', array());
+	$have = array();
+	foreach ($a_client as $c) {
+		if (($c['description'] ?? '') !== '') {
+			$have[$c['description']] = true;
+		}
+	}
+	$reg = vpp_registry();
+	$added = 0;
+	foreach ((array)($data['clients'] ?? array()) as $entry) {
+		$client = $entry['client'] ?? array();
+		$descr = (string)($client['description'] ?? '');
+		if ($descr === '' || isset($have[$descr])) {
+			continue;
+		}
+		$a_client[] = $client;
+		$have[$descr] = true;
+		$iface = $entry['interface'] ?? array();
+		if (is_array($iface) && !empty($iface['if'])) {
+			foreach ((array)($entry['registry'] ?? array()) as $k => $v) {
+				if ($k === 'opt' && $v !== '') {
+					config_set_path("interfaces/{$v}", $iface);
+				}
+			}
+		}
+		foreach ((array)($entry['gateways'] ?? array()) as $gw) {
+			$a_gw = (array)config_get_path('gateways/gateway_item', array());
+			$a_gw[] = $gw;
+			config_set_path('gateways/gateway_item', $a_gw);
+		}
+		if (!empty($entry['registry']['description']) && !isset($reg[$entry['registry']['uid'] ?? ''])) {
+			$r = $entry['registry'];
+			$r['uid'] = $r['uid'] ?? uniqid('pvd');
+			$reg[$r['uid']] = $r;
+		}
+		$added++;
+	}
+	config_set_path('openvpn/openvpn-client', $a_client);
+	if ($added > 0) {
+		vpp_registry_save($reg);
+		write_config('VPN Providers: restored ' . $added . ' client(s)');
+	}
+	return array('added' => $added);
 }
