@@ -249,6 +249,23 @@ function vpp_find_ca_by_descr($descr) {
 	return '';
 }
 
+/* Reuse an existing CA with identical certificate content - importing
+   several provider configs must not duplicate the same CA. */
+function vpp_find_ca_by_crt($pem) {
+	$finger = base64_encode(preg_replace('/\s+/', '', $pem));
+	foreach ((array)config_get_path('ca', array()) as $ca) {
+		if (($ca['crt'] ?? '') === $finger) {
+			return $ca['refid'];
+		}
+		/* same certificate with different line wrapping */
+		$existing = base64_decode($ca['crt'] ?? '');
+		if ($existing !== false && preg_replace('/\s+/', '', $existing) === preg_replace('/\s+/', '', $pem)) {
+			return $ca['refid'];
+		}
+	}
+	return '';
+}
+
 function vpp_find_client_by_descr($descr) {
 	$id = 0;
 	foreach ((array)config_get_path('openvpn/openvpn-client', array()) as $k => $c) {
@@ -283,9 +300,13 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 	$opt = vpp_next_opt();
 	$safe = strtoupper(preg_replace('/[^A-Za-z0-9]/', '_', $name));
 
-	/* CA: reuse an existing CA with our descr, else import a new one */
+	/* CA: reuse an existing CA with our descr OR identical certificate
+	   content, else import a new one */
 	$ca_descr = 'PVD ' . $name . ' CA';
 	$caref = vpp_find_ca_by_descr($ca_descr);
+	if ($caref === '') {
+		$caref = vpp_find_ca_by_crt($parsed['ca_pem']);
+	}
 	$ca_item = null;
 	if ($caref === '') {
 		$caref = uniqid();
@@ -317,7 +338,7 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 		$custom .= "remote-cert-tls server;\n";
 	}
 	foreach ($parsed['custom'] as $c) {
-		if (preg_match('/^(remote|proto|auth |cipher|data-ciphers|keepalive|verb|dev|local|lport|management|ca |cert |key |tls-auth|tls-crypt|auth-user-pass|route-nopull|up |down |script-security|daemon|writepid|dev-node|dev-type|pull)/i', $c)) {
+		if (preg_match('/^(client\b|dev\b|persist-key|persist-tun|remote-random|nobind|resolv-retry|remote\b|proto\b|auth\b|cipher\b|data-ciphers|keepalive|verb\b|local\b|lport\b|management\b|ca\b|cert\b|key\b|tls-auth|tls-crypt|auth-user-pass|route-nopull|up\b|down\b|script-security|daemon|writepid|dev-node|dev-type|pull\b|remote-cert-tls)/i', $c)) {
 			continue; /* mapped natively or already added */
 		}
 		$custom .= rtrim($c) . ";\n";
