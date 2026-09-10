@@ -13,13 +13,31 @@
  *    (description prefix "Provider: ") are ever touched by remove.
  */
 
-require_once("/etc/inc/config.inc");
-require_once("/etc/inc/functions.inc");
-require_once("/etc/inc/certs.inc");
-require_once("/etc/inc/openvpn.inc");
+/* pfSense internals - guarded so the library can be unit-tested off-box
+   with the harness stubs (they always exist on pfSense itself). */
+foreach (array('/etc/inc/config.inc', '/etc/inc/functions.inc', '/etc/inc/certs.inc', '/etc/inc/openvpn.inc') as $_inc) {
+	if (file_exists($_inc)) {
+		require_once($_inc);
+	}
+}
+if (!function_exists('openvpn_resync')) {
+	function openvpn_resync($mode, $item) { vpp_log('stub openvpn_resync called'); }
+}
+if (!function_exists('openvpn_kill_client')) {
+	function openvpn_kill_client($port, $remipp, $client_id) { return true; }
+}
+if (!function_exists('openvpn_configure')) {
+	function openvpn_configure($restart = false) { return true; }
+}
+if (!function_exists('services_unbound_configure')) {
+	function services_unbound_configure($restart = true) { return true; }
+}
+if (!function_exists('filter_configure')) {
+	function filter_configure() { return true; }
+}
 
 define('VPP_BASE', '/usr/local/pfsense_vpn_providers');
-define('VPP_STATE', '/var/db/pfsense_vpn_providers');
+define('VPP_STATE', getenv('VPP_STATE') ?: '/var/db/pfsense_vpn_providers');
 define('VPP_REGISTRY', VPP_STATE . '/registry.json');
 define('VPP_MARKER', 'Provider: ');
 
@@ -93,8 +111,6 @@ function vpp_parse_ovpn($text) {
 			elseif ($tag === 'key') { $out['key_pem'] = $buf; }
 			elseif ($tag === 'tls-auth') {
 				$out['tls'] = $buf; $out['tls_type'] = 'auth';
-				/* trailing direction may sit on the block opener or after */
-				$after = trim(implode(' ', array_slice(explode("\n", trim($buf)), -0)));
 				$out['tls_direction'] = '';
 			}
 			elseif ($tag === 'tls-crypt') {
@@ -127,7 +143,8 @@ function vpp_parse_ovpn($text) {
 				$out['auth'] = strtoupper($arg);
 				break;
 			case 'data-ciphers':
-				$out['data_ciphers'] = array_map('trim', explode(',', implode(' ', array_slice($parts, 1))));
+				/* colon separated per OpenVPN */
+				$out['data_ciphers'] = array_values(array_filter(array_map('trim', explode(':', implode(' ', array_slice($parts, 1))))));
 				break;
 			case 'cipher':
 				$out['cipher'] = strtoupper($arg);
@@ -250,12 +267,9 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 		return array('error' => 'invalid name (letters, digits, space, _ - max 40 chars)');
 	}
 	$descr = VPP_MARKER . $name;
-	if (vpp_find_client_by_descr($descr) !== 0 || vpp_find_client_by_descr($descr) === 0 && count((array)config_get_path('openvpn/openvpn-client', array())) > 0) {
-		/* find_client returns 0 for "not found" AND for index 0; check descr explicitly */
-		foreach ((array)config_get_path('openvpn/openvpn-client', array()) as $c) {
-			if (($c['description'] ?? '') === $descr) {
-				return array('error' => 'a client named "' . $name . '" already exists');
-			}
+	foreach ((array)config_get_path('openvpn/openvpn-client', array()) as $c) {
+		if (($c['description'] ?? '') === $descr) {
+			return array('error' => 'a client named "' . $name . '" already exists');
 		}
 	}
 	if (empty($parsed['ca_pem'])) {
@@ -444,6 +458,7 @@ function vpp_apply_create($plan) {
 
 	/* regenerate the (disabled) client config; no tunnel starts */
 	openvpn_resync('client', $plan['client']);
+	services_unbound_configure(false);
 	filter_configure();
 
 	/* registry */
