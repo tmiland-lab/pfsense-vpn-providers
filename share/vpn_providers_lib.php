@@ -146,6 +146,33 @@ function vpp_airvpn_key() {
 	return trim((string)config_get_path('installedpackages/vpn_providers/settings/airvpn_api_key', ''));
 }
 
+/* AirVPN uses one shared tls-crypt static key across all servers. Reuse the
+   one already configured on an existing AirVPN tunnel so quick-add needs no
+   manual paste. Prefers an AirVPN-named client, falls back to any tls-crypt. */
+function vpp_airvpn_tlskey() {
+	$airvpn = '';
+	$any = '';
+	foreach ((array)config_get_path('openvpn/openvpn-client', array()) as $c) {
+		$b64 = (string)($c['tls'] ?? '');
+		if ($b64 === '' || ($c['tls_type'] ?? '') !== 'crypt') {
+			continue;
+		}
+		$pem = base64_decode($b64, true);
+		if ($pem === false || $pem === '') {
+			continue;
+		}
+		$descr = strtolower((string)($c['description'] ?? ''));
+		if (strpos($descr, 'airvpn') !== false || strpos($descr, 'provider:') !== false) {
+			$airvpn = trim($pem);
+			break;
+		}
+		if ($any === '') {
+			$any = trim($pem);
+		}
+	}
+	return $airvpn !== '' ? $airvpn : $any;
+}
+
 function vpp_airvpn_parse_status($json) {
 	$j = json_decode($json, true);
 	if (!is_array($j) || !isset($j['servers']) || !is_array($j['servers'])) {

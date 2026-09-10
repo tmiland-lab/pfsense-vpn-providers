@@ -54,8 +54,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && hash_equals($_POST['csrf'] ?? '', $_
 	} elseif ($action === 'add_airvpn') {
 		$name = trim(vpp_post('name'));
 		$tls = vpp_post('tlskey');
+		if ($name === '') {
+			$input_errors[] = gettext('Name is required.');
+		}
+		if (trim($tls) === '') {
+			/* reuse the shared AirVPN tls-crypt key from an existing tunnel */
+			$tls = vpp_airvpn_tlskey();
+		}
 		if ($name === '' || trim($tls) === '') {
-			$input_errors[] = gettext('Name and the tls-crypt key are required.');
+			$input_errors[] = gettext('The tls-crypt key is required - paste the &lt;tls-crypt&gt; block from an AirVPN .ovpn export.');
 		} else {
 			$servers = vpp_airvpn_servers();
 			if (isset($servers['error'])) {
@@ -201,29 +208,12 @@ display_top_tabs($tab_array);
 	</div>
 </div>
 
-<div class="panel panel-default">
-	<div class="panel-heading"><h2 class="panel-title"><?= gettext('Add client from a provider .ovpn config') ?></h2></div>
-	<div class="panel-body">
-		<form method="post" enctype="multipart/form-data">
-			<input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['request_token']) ?>" />
-			<input type="hidden" name="action" value="add_import" />
-			<table class="table">
-				<tr><td style="width:25%"><strong><?= gettext('Name') ?></strong><br /><span class="text-muted"><?= gettext('letters, digits, space, _ - (e.g. Mullvad SE)') ?></span></td>
-					<td><input class="form-control" type="text" name="name" maxlength="40" autocomplete="off" required /></td></tr>
-				<tr><td><strong><?= gettext('.ovpn file') ?></strong><br /><span class="text-muted"><?= gettext('upload or paste below') ?></span></td>
-					<td><input type="file" name="ovpnfile" class="form-control" /></td></tr>
-				<tr><td><strong><?= gettext('.ovpn contents') ?></strong></td>
-					<td><textarea class="form-control" name="ovpntext" rows="6" placeholder="client&#10;remote vpn.example.com 1194 udp4&#10;..."></textarea></td></tr>
-			</table>
-			<button type="submit" class="btn btn-primary"><?= gettext('Parse and create (disabled)') ?></button>
-		</form>
-	</div>
-</div>
 
 <div class="panel panel-default">
 	<div class="panel-heading"><h2 class="panel-title"><?= gettext('AirVPN quick add') ?></h2></div>
 	<div class="panel-body">
 <?php $airvpn_servers = vpp_airvpn_servers(isset($_GET['refresh_servers']) && $_GET['refresh_servers'] === '1'); ?>
+<?php $airvpn_tlskey = vpp_airvpn_tlskey(); ?>
 <?php if (isset($airvpn_servers['error'])): ?>
 		<?= print_info_box(htmlspecialchars($airvpn_servers['error']) . ' - ' . gettext('falling back to a manual country code.'), 'warning') ?>
 <?php endif; ?>
@@ -261,8 +251,8 @@ display_top_tabs($tab_array);
 				<tr><td><strong><?= gettext('Country code') ?></strong><br /><span class="text-muted"><?= gettext('SE, DE, US, ... - server <cc>3.vpn.airdns.org') ?></span></td>
 					<td><input class="form-control" type="text" name="country" maxlength="3" autocomplete="off" required /></td></tr>
 <?php endif; ?>
-				<tr><td><strong><?= gettext('tls-crypt key') ?></strong><br /><span class="text-muted"><?= gettext('paste the &lt;tls-crypt&gt; block from any AirVPN .ovpn export') ?></span></td>
-					<td><textarea class="form-control" name="tlskey" rows="5" placeholder="-----BEGIN OpenVPN Static key V1-----"></textarea></td></tr>
+				<tr><td><strong><?= gettext('tls-crypt key') ?></strong><br /><span class="text-muted"><?= $airvpn_tlskey === '' ? gettext('paste the &lt;tls-crypt&gt; block from any AirVPN .ovpn export') : gettext('shared across all AirVPN servers - already configured on this box, edit only if needed') ?></span></td>
+					<td><textarea class="form-control" name="tlskey" rows="5" placeholder="-----BEGIN OpenVPN Static key V1-----"><?= htmlspecialchars($airvpn_tlskey) ?></textarea></td></tr>
 			</table>
 			<p class="text-muted"><?= gettext('Reuses the installed AirVPN_CA. The remote list is managed by the AirVPN Remotes monitor package once the client is enabled.') ?></p>
 <?php if (isset($airvpn_servers['list'])): ?>
@@ -299,4 +289,24 @@ function vppDeriveName() {
 		</form>
 	</div>
 </div>
+
+<div class="panel panel-default">
+	<div class="panel-heading"><h2 class="panel-title"><?= gettext('Add client from a provider .ovpn config') ?></h2></div>
+	<div class="panel-body">
+		<form method="post" enctype="multipart/form-data">
+			<input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['request_token']) ?>" />
+			<input type="hidden" name="action" value="add_import" />
+			<table class="table">
+				<tr><td style="width:25%"><strong><?= gettext('Name') ?></strong><br /><span class="text-muted"><?= gettext('letters, digits, space, _ - (e.g. Mullvad SE)') ?></span></td>
+					<td><input class="form-control" type="text" name="name" maxlength="40" autocomplete="off" required /></td></tr>
+				<tr><td><strong><?= gettext('.ovpn file') ?></strong><br /><span class="text-muted"><?= gettext('upload or paste below') ?></span></td>
+					<td><input type="file" name="ovpnfile" class="form-control" /></td></tr>
+				<tr><td><strong><?= gettext('.ovpn contents') ?></strong></td>
+					<td><textarea class="form-control" name="ovpntext" rows="6" placeholder="client&#10;remote vpn.example.com 1194 udp4&#10;..."></textarea></td></tr>
+			</table>
+			<button type="submit" class="btn btn-primary"><?= gettext('Parse and create (disabled)') ?></button>
+		</form>
+	</div>
+</div>
+
 <?php include("foot.inc");

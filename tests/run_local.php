@@ -163,6 +163,23 @@ check($parsed_api['list'][3]['host'] === 'nz2.vpn.airdns.org' && $parsed_api['li
 check(isset(vpp_airvpn_parse_status('{bad')[ 'error']), 'bad json -> error');
 check(vpp_airvpn_continent('nl') === 'Europe' && vpp_airvpn_continent('us') === 'America' && vpp_airvpn_continent('za') === 'Africa' && vpp_airvpn_continent('ae') === 'Middle East', 'continent map: nl/us/za/ae');
 
+echo "== AirVPN shared tls-crypt key reuse ==\n";
+$key_pem = "-----BEGIN OpenVPN Static key V1-----\n". bin2hex("sharedkey") . "\n-----END OpenVPN Static key V1-----";
+$other_pem = "-----BEGIN OpenVPN Static key V1-----\n". bin2hex("other-other-other") . "\n-----END OpenVPN Static key V1-----";
+$GLOBALS['CFG'] = array('openvpn' => array('openvpn-client' => array(
+	array('vpnid' => 3, 'description' => 'AirVPN_NO', 'tls' => base64_encode($key_pem), 'tls_type' => 'crypt'),
+	array('vpnid' => 7, 'description' => 'Other VPN', 'tls' => base64_encode($other_pem), 'tls_type' => 'crypt'),
+	array('vpnid' => 9, 'description' => 'No Key', 'tls_type' => 'auth'),
+)));
+$found = vpp_airvpn_tlskey();
+check($found === $key_pem, 'reuses AirVPN-named client key');
+$GLOBALS['CFG'] = array('openvpn' => array('openvpn-client' => array(
+	array('vpnid' => 7, 'description' => 'Other VPN', 'tls' => base64_encode($key_pem), 'tls_type' => 'crypt'),
+)));
+check(vpp_airvpn_tlskey() === $key_pem, 'falls back to any tls-crypt client');
+$GLOBALS['CFG'] = array();
+check(vpp_airvpn_tlskey() === '', 'empty when no client has a key');
+
 echo "== duplicate name rejected ==\n";
 $GLOBALS['CFG'] = array('openvpn' => array('openvpn-client' => array($plan['client'])));
 $dup = vpp_plan_create('AirVPN Sweden', $p);
