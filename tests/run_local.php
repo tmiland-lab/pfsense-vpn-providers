@@ -118,7 +118,7 @@ $plan = vpp_plan_create('AirVPN Sweden', $p);
 check(!isset($plan['error']), 'plan builds: ' . ($plan['error'] ?? 'ok'));
 check($plan['client']['description'] === 'Provider: AirVPN Sweden', 'description marker');
 check($plan['client']['disable'] === true, 'created disabled');
-check($plan['client']['protocol'] === 'udp4', 'protocol');
+check($plan['client']['protocol'] === 'UDP4', 'protocol stored uppercase (REST API validates strictly)');
 check($plan['client']['server_addr'] === 'se3.vpn.airdns.org' && $plan['client']['server_port'] === '443', 'server from first remote');
 check($plan['client']['tls_type'] === 'crypt' && $plan['client']['tlsauth_keydir'] === 'default', 'tls mapping');
 check(substr($plan['client']['tls'], 0, 5) !== '-----', 'tls base64-encoded');

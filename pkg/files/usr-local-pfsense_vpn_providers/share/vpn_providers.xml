@@ -2,7 +2,7 @@
 <!DOCTYPE packagegui SYSTEM "../schema/packages.dtd">
 <packagegui>
 	<name>vpn_providers</name>
-	<version>0.1.10</version>
+	<version>0.1.11</version>
 	<title>VPN Providers</title>
 	<menu>
 		<name>VPN Providers</name>

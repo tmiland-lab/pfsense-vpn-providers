@@ -603,7 +603,9 @@ function vpp_plan_create($name, $parsed, $opts = array()) {
 
 	$client = array(
 		'vpnid' => $vpnid,
-		'protocol' => $parsed['proto'],
+		/* pfSense core tolerates lowercase, but the REST API validates strictly
+		   (Field `protocol` must be one of [UDP4, ...]) - always store uppercase */
+		'protocol' => strtoupper($parsed['proto']),
 		'dev_mode' => 'tun',
 		'interface' => 'wan',
 		'server_addr' => $parsed['remotes'][0][0],
